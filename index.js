@@ -49,7 +49,7 @@ app.get("/matches/:status", async (req, res) => {
       JOIN teams t2 ON m.team_2 = t2.id
       JOIN venues v ON m.venue_id = v.id
       WHERE m.match_status_id = ?
-      ORDER BY m.date_start ASC
+      ORDER BY m.date_start DESC
       LIMIT ${per_page} OFFSET ${offset}
     `;
 
