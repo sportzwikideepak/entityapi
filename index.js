@@ -37,29 +37,42 @@ app.get("/matches/:status", async (req, res) => {
 
     const offset = (page - 1) * per_page;
 
-    // ✅ Updated Query: Order by date_start ASC to show earliest matches first
+    // ✅ Updated Query: Fetch team logos from the `teams` table
     const query = `
       SELECT 
         m.id AS match_id, m.name AS title, m.date_start, m.match_status_id, 
-        t1.id AS teamA_id, t1.name AS teamA_name, t1.short_name AS teamA_short, t1.slug AS teamA_slug,
-        t2.id AS teamB_id, t2.name AS teamB_name, t2.short_name AS teamB_short, t2.slug AS teamB_slug,
-        v.id AS venue_id, v.name AS venue_name, v.city AS venue_city, v.country AS venue_country
+        t1.id AS teamA_id, t1.name AS teamA_name, t1.short_name AS teamA_short, t1.slug AS teamA_slug, 
+        t1.logo_url AS teamA_logo,
+        t2.id AS teamB_id, t2.name AS teamB_name, t2.short_name AS teamB_short, t2.slug AS teamB_slug, 
+        t2.logo_url AS teamB_logo,
+        v.id AS venue_id, v.name AS venue_name, v.city AS venue_city, v.country AS venue_country,
+        c.id AS competition_id, c.name AS competition_name, c.abbr AS competition_abbr, 
+        mc.id AS match_category_id, mc.name AS match_category_name
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
       JOIN venues v ON m.venue_id = v.id
+      LEFT JOIN competitions c ON m.competition_id = c.id
+      LEFT JOIN match_categories mc ON c.match_category_id = mc.id
       WHERE m.match_status_id = ?
-      ORDER BY m.date_start ASC  -- ✅ Show earliest matches first
-      LIMIT ${per_page} OFFSET ${offset}
+      ORDER BY 
+        CASE 
+          WHEN mc.id = 1 THEN 1  -- ✅ International Matches First
+          WHEN mc.id IS NULL THEN 3  -- ✅ If no category, push to the end
+          ELSE 2 
+        END, 
+        c.name ASC,   -- ✅ Sort by competition name
+        m.date_start ASC  -- ✅ Sort by earliest match first
+      LIMIT ? OFFSET ?
     `;
 
     console.log("🔹 Executing Query:", query);
     console.log("🔹 Status Condition:", statusCondition);
     console.log("🔹 Limit:", per_page, "Offset:", offset);
 
-    const [matches] = await db.execute(query, [statusCondition]);
+    const [matches] = await db.execute(query, [statusCondition, per_page, offset]);
 
-    console.log("🔹 Matches Found:", matches);  // ✅ Debug if India's matches are there
+    console.log("🔹 Matches Found:", matches.length);
 
     const countQuery = `SELECT COUNT(*) AS total FROM matches WHERE match_status_id = ?`;
     const [countResult] = await db.execute(countQuery, [statusCondition]);
@@ -78,6 +91,8 @@ app.get("/matches/:status", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
 
 
 // ✅ Fetch a Single  Match id
