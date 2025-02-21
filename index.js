@@ -37,7 +37,7 @@ app.get("/matches/:status", async (req, res) => {
 
     const offset = (page - 1) * per_page;
 
-    // Debugging: Log the query before executing
+    // ✅ Updated Query: Order by date_start ASC to show earliest matches first
     const query = `
       SELECT 
         m.id AS match_id, m.name AS title, m.date_start, m.match_status_id, 
@@ -49,7 +49,7 @@ app.get("/matches/:status", async (req, res) => {
       JOIN teams t2 ON m.team_2 = t2.id
       JOIN venues v ON m.venue_id = v.id
       WHERE m.match_status_id = ?
-      ORDER BY m.date_start DESC
+      ORDER BY m.date_start ASC  -- ✅ Show earliest matches first
       LIMIT ${per_page} OFFSET ${offset}
     `;
 
@@ -58,6 +58,8 @@ app.get("/matches/:status", async (req, res) => {
     console.log("🔹 Limit:", per_page, "Offset:", offset);
 
     const [matches] = await db.execute(query, [statusCondition]);
+
+    console.log("🔹 Matches Found:", matches);  // ✅ Debug if India's matches are there
 
     const countQuery = `SELECT COUNT(*) AS total FROM matches WHERE match_status_id = ?`;
     const [countResult] = await db.execute(countQuery, [statusCondition]);
@@ -76,6 +78,7 @@ app.get("/matches/:status", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 // ✅ Fetch a Single  Match id
 app.get("/match/:match_id", async (req, res) => {
@@ -936,20 +939,23 @@ const getStatField = (statType) => {
               END AS economy_rate`;
     case "AverageFantasyPoints":
       return "ROUND(AVG(pfp.point), 2) AS avg_fantasy_points";
+    case "DreamTeamAppearances":
+      return "COUNT(DISTINCT CASE WHEN mdt.player_id IS NOT NULL THEN mdt.match_id END) AS dream_team_appearances";
+    case "CaptainCount":
+      return "SUM(CASE WHEN mdt.is_captain = 1 THEN 1 ELSE 0 END) AS captain_count";
+    case "ViceCaptainCount":
+      return "SUM(CASE WHEN mdt.is_vice_captain = 1 THEN 1 ELSE 0 END) AS vice_captain_count";
     default:
       return null;
   }
 };
 
-// API Route
 app.get("/stats", async (req, res) => {
   try {
     const { match_id, statType } = req.query;
 
     if (!match_id || !statType) {
-      return res
-        .status(400)
-        .json({ error: "match_id and statType are required." });
+      return res.status(400).json({ error: "match_id and statType are required." });
     }
 
     const statField = getStatField(statType);
@@ -959,14 +965,11 @@ app.get("/stats", async (req, res) => {
 
     const query = `
       WITH player_squads AS (
-          -- ✅ Get all players in the squad for the given match_id
           SELECT player_id, team_id
           FROM match_squads
           WHERE match_id = ?
       ),
-
       player_last_matches AS (
-          -- ✅ Get last 5 matches per player using ROW_NUMBER()
           SELECT player_id, match_id
           FROM (
               SELECT 
@@ -978,7 +981,6 @@ app.get("/stats", async (req, res) => {
           ) ranked_matches
           WHERE row_num <= 5
       )
-
       SELECT 
           ps.player_id,
           COALESCE(pfp.player_name, 'Unknown') AS player_name,
@@ -986,7 +988,7 @@ app.get("/stats", async (req, res) => {
           ps.team_id,
           COALESCE(t.name, 'Unknown') AS team_name,
           COALESCE(COUNT(DISTINCT plm.match_id), 0) AS matches_played,
-          ${statField}  -- ✅ Dynamically fetch only the requested stat
+          ${statField}
       FROM player_squads ps
       LEFT JOIN player_last_matches plm 
           ON ps.player_id = plm.player_id 
@@ -995,12 +997,15 @@ app.get("/stats", async (req, res) => {
           AND plm.match_id = pfp.match_id
       LEFT JOIN teams t 
           ON ps.team_id = t.id
-      LEFT JOIN match_inning_batters bat  -- ✅ Fetch batting data
+      LEFT JOIN match_inning_batters bat  
           ON ps.player_id = bat.batsman_id 
           AND bat.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = plm.match_id)
-      LEFT JOIN match_inning_bowlers bowl  -- ✅ Fetch bowling data
+      LEFT JOIN match_inning_bowlers bowl  
           ON ps.player_id = bowl.bowler_id 
           AND bowl.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = plm.match_id)
+      LEFT JOIN match_dream_teams mdt  
+          ON ps.player_id = mdt.player_id 
+          AND plm.match_id = mdt.match_id
       GROUP BY ps.player_id, pfp.player_name, pfp.role, ps.team_id, t.name
       ORDER BY matches_played DESC;
     `;
@@ -1012,6 +1017,7 @@ app.get("/stats", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 // --------------------------------cheat sheet ----------------------------------------------
 
@@ -1835,6 +1841,81 @@ app.get("/top-players-at-venue-overall", async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+app.get('/top-players-venue1', async (req, res) => {
+  try {
+    const { match_id } = req.query;
+    if (!match_id) return res.status(400).json({ error: 'match_id is required' });
+
+    const venueQuery = `SELECT venue_id FROM matches WHERE id = ?`;
+    const [venueResult] = await db.execute(venueQuery, [match_id]);
+    const venue_id = venueResult[0]?.venue_id;
+
+    if (!venue_id) return res.status(404).json({ error: 'Venue not found for the given match_id' });
+
+    const queryTemplate = (limitClause = '') => `
+      SELECT 
+        md.player_id, 
+        mpf.player_name, 
+        COUNT(md.id) as total_matches,
+        SUM(md.is_captain) as captain_count,
+        SUM(md.is_vice_captain) as vice_captain_count,
+        (SUM(md.is_captain) + SUM(md.is_vice_captain)) as total_appearances
+      FROM match_dream_teams md
+      JOIN match_fantasy_points mpf ON md.player_id = mpf.player_id AND md.match_id = mpf.match_id
+      WHERE md.match_id IN (SELECT id FROM matches WHERE venue_id = ?)
+      GROUP BY md.player_id, mpf.player_name
+      ORDER BY total_appearances DESC, total_matches DESC
+      ${limitClause}
+    `;
+
+    const [overallPlayers] = await db.execute(queryTemplate('LIMIT 5'), [venue_id]);
+    const [last5Players] = await db.execute(queryTemplate('LIMIT 5 OFFSET 5'), [venue_id]);
+    const [lastMatchPlayers] = await db.execute(queryTemplate('LIMIT 1'), [venue_id]);
+
+    res.json({
+      last_match: lastMatchPlayers,
+      last_5_matches: last5Players,
+      overall: overallPlayers
+    });
+
+  } catch (error) {
+    console.error('Error fetching top players at venue:', error.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // -----------------------------------------------------team stats ----------------------------------------
 
 app.get("/team-vs-team", async (req, res) => {
@@ -2104,7 +2185,7 @@ app.get("/team-vs-team-stats", async (req, res) => {
   }
 });
 
-// ---------------------team stats----------------------------------
+// ---------------------player overview----------------------------------
 
 app.get("/player-stats", async (req, res) => {
   try {
@@ -2395,3 +2476,75 @@ app.get("/player-stats-last5", async (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+
+
+
+
+
+// -------------------------------key insight --------------------------------
+
+app.get('/key-insight', async (req, res) => {
+  try {
+    const { match_id } = req.query;
+    if (!match_id) return res.status(400).json({ error: 'match_id is required' });
+
+    const squadQuery = `
+      SELECT ms.player_id, ms.team_id, t.name as team_name, 
+             p.first_name as player_name, p.playing_role
+      FROM match_squads ms
+      JOIN players p ON ms.player_id = p.id
+      JOIN teams t ON ms.team_id = t.id
+      WHERE ms.match_id = ?`;
+    const [squadPlayers] = await db.execute(squadQuery, [match_id]);
+
+    let playerStats = [];
+
+    for (const player of squadPlayers) {
+      const playerId = player.player_id;
+
+      const last5MatchesQuery = `
+        SELECT pfp.point AS points
+        FROM match_fantasy_points pfp
+        WHERE pfp.player_id = ?
+        ORDER BY pfp.match_id DESC LIMIT 5`;
+      const [playerData] = await db.execute(last5MatchesQuery, [playerId]);
+
+      const total_matches = playerData.length;
+      const total_points = playerData.reduce((acc, curr) => acc + curr.points, 0);
+      const avg_points = total_matches > 0 ? total_points / total_matches : 0;
+
+      playerStats.push({
+        player_id: playerId,
+        player_name: player.player_name || 'N/A',
+        team_name: player.team_name || 'N/A',
+        playing_role: player.playing_role || 'N/A',
+        total_points,
+        avg_points,
+        total_matches
+      });
+    }
+
+    playerStats.sort((a, b) => b.total_points - a.total_points);
+
+    const suggestedPlayers = playerStats.slice(0, 5);
+    const topBatters = playerStats.filter(p => p.playing_role.toLowerCase().includes('bat')).slice(0, 5);
+    const topBowlers = playerStats.filter(p => p.playing_role.toLowerCase().includes('bowl')).slice(0, 5);
+    const xFactorPlayers = [
+      ...playerStats.filter(p => p.playing_role.toLowerCase().includes('bat')).slice(0, 2),
+      ...playerStats.filter(p => p.playing_role.toLowerCase().includes('all')).slice(0, 2),
+      ...playerStats.filter(p => p.playing_role.toLowerCase().includes('bowl')).slice(0, 2),
+    ];
+
+    res.json({
+      suggested_players: suggestedPlayers,
+      top_batting_players: topBatters,
+      top_bowling_players: topBowlers,
+      x_factor_players: xFactorPlayers
+    });
+
+  } catch (error) {
+    console.error('Error fetching key insights:', error.message);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
