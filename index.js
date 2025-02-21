@@ -37,7 +37,7 @@ app.get("/matches/:status", async (req, res) => {
 
     const offset = (page - 1) * per_page;
 
-    // ✅ Updated Query: Ensure sorting by nearest match date & include both categories
+    // ✅ Ensure only **future** upcoming matches are shown
     const query = `
       SELECT 
         m.id AS match_id, m.name AS title, m.date_start, m.match_status_id, 
@@ -54,22 +54,32 @@ app.get("/matches/:status", async (req, res) => {
       JOIN venues v ON m.venue_id = v.id
       LEFT JOIN competitions c ON m.competition_id = c.id
       LEFT JOIN match_categories mc ON c.match_category_id = mc.id
-      WHERE m.match_status_id = ?
+      WHERE 
+        (m.match_status_id = 1 AND m.date_start >= NOW())  -- ✅ Upcoming matches must be in the future
+        OR m.match_status_id = 3  -- ✅ Live matches
+        OR m.match_status_id = 2  -- ✅ Completed matches
+        OR m.match_status_id = 4  -- ✅ Cancelled matches
       ORDER BY 
-        m.date_start ASC  -- ✅ Sort by nearest match first
-      LIMIT ? OFFSET ? 
+        CASE 
+          WHEN m.match_status_id = 1 THEN 1  -- ✅ Upcoming Matches First
+          WHEN m.match_status_id = 3 THEN 2  -- ✅ Live Matches Second
+          WHEN m.match_status_id = 2 THEN 3  -- ✅ Completed Matches Third
+          WHEN m.match_status_id = 4 THEN 4  -- ✅ Cancelled Matches Last
+        END,
+        m.date_start ASC  -- ✅ Sort by upcoming date within each status
+      LIMIT ? OFFSET ?
     `;
 
     console.log("🔹 Executing Query:", query);
     console.log("🔹 Status Condition:", statusCondition);
     console.log("🔹 Limit:", per_page, "Offset:", offset);
 
-    const [matches] = await db.execute(query, [statusCondition, per_page, offset]);
+    const [matches] = await db.execute(query, [per_page, offset]);
 
     console.log("🔹 Matches Found:", matches.length);
 
-    const countQuery = `SELECT COUNT(*) AS total FROM matches WHERE match_status_id = ?`;
-    const [countResult] = await db.execute(countQuery, [statusCondition]);
+    const countQuery = `SELECT COUNT(*) AS total FROM matches WHERE (match_status_id = 1 AND date_start >= NOW()) OR match_status_id IN (2, 3, 4)`;
+    const [countResult] = await db.execute(countQuery);
     const totalMatches = countResult[0].total;
     const totalPages = Math.ceil(totalMatches / per_page);
 
@@ -85,6 +95,8 @@ app.get("/matches/:status", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
 
 
 
