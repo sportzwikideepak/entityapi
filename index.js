@@ -37,7 +37,7 @@ app.get("/matches/:status", async (req, res) => {
 
     const offset = (page - 1) * per_page;
 
-    // ✅ Updated Query: Fetch team logos from the `teams` table
+    // ✅ Updated Query: Ensure sorting by nearest match date & include both categories
     const query = `
       SELECT 
         m.id AS match_id, m.name AS title, m.date_start, m.match_status_id, 
@@ -56,14 +56,8 @@ app.get("/matches/:status", async (req, res) => {
       LEFT JOIN match_categories mc ON c.match_category_id = mc.id
       WHERE m.match_status_id = ?
       ORDER BY 
-        CASE 
-          WHEN mc.id = 1 THEN 1  -- ✅ International Matches First
-          WHEN mc.id IS NULL THEN 3  -- ✅ If no category, push to the end
-          ELSE 2 
-        END, 
-        c.name ASC,   -- ✅ Sort by competition name
-        m.date_start ASC  -- ✅ Sort by earliest match first
-      LIMIT ? OFFSET ?
+        m.date_start ASC  -- ✅ Sort by nearest match first
+      LIMIT ? OFFSET ? 
     `;
 
     console.log("🔹 Executing Query:", query);
