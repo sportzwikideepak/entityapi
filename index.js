@@ -23,62 +23,65 @@ app.get("/matches/:status", async (req, res) => {
     const { status } = req.params;
     let { per_page = 80, page = 1 } = req.query;
 
-    per_page = parseInt(per_page);
-    page = parseInt(page);
-    if (isNaN(per_page) || per_page <= 0) per_page = 80;
-    if (isNaN(page) || page <= 0) page = 1;
-
-    let statusCondition;
-    if (status === "upcoming") statusCondition = 1;
-    else if (status === "completed") statusCondition = 2;
-    else if (status === "live") statusCondition = 3;
-    else if (status === "cancelled") statusCondition = 4;
-    else return res.status(400).json({ message: "Invalid status" });
-
+    per_page = parseInt(per_page) || 80;
+    page = Math.max(parseInt(page) || 1, 1);
     const offset = (page - 1) * per_page;
 
-    // ✅ Ensure only **future** upcoming matches are shown
+    let statusCondition = "";
+    let orderBy = "";
+
+    if (status === "upcoming") {
+      statusCondition = "matches.match_status_id = 1 AND matches.date_start >= NOW()";
+      orderBy = "matches.date_start ASC"; // Upcoming: Nearest matches first
+    } else if (status === "live") {
+      statusCondition = "matches.match_status_id = 3";
+      orderBy = "matches.date_start DESC"; // Live: Latest live matches first
+    } else if (status === "completed") {
+      statusCondition = "matches.match_status_id = 2 AND matches.date_start <= NOW()";
+      orderBy = "matches.date_start DESC"; // Completed: Most recent matches first
+    } else {
+      return res.status(400).json({ message: "Invalid status. Use upcoming, live, or completed." });
+    }
+
+    // ✅ Fetch the matches
     const query = `
       SELECT 
-        m.id AS match_id, m.name AS title, m.date_start, m.match_status_id, 
-        t1.id AS teamA_id, t1.name AS teamA_name, t1.short_name AS teamA_short, t1.slug AS teamA_slug, 
+        matches.id AS match_id, 
+        matches.name AS title, 
+        matches.date_start, 
+        matches.match_status_id,
+        t1.id AS teamA_id, t1.name AS teamA_name, t1.short_name AS teamA_short, 
         t1.logo_url AS teamA_logo,
-        t2.id AS teamB_id, t2.name AS teamB_name, t2.short_name AS teamB_short, t2.slug AS teamB_slug, 
+        t2.id AS teamB_id, t2.name AS teamB_name, t2.short_name AS teamB_short, 
         t2.logo_url AS teamB_logo,
-        v.id AS venue_id, v.name AS venue_name, v.city AS venue_city, v.country AS venue_country,
-        c.id AS competition_id, c.name AS competition_name, c.abbr AS competition_abbr, 
-        mc.id AS match_category_id, mc.name AS match_category_name
-      FROM matches m
-      JOIN teams t1 ON m.team_1 = t1.id
-      JOIN teams t2 ON m.team_2 = t2.id
-      JOIN venues v ON m.venue_id = v.id
-      LEFT JOIN competitions c ON m.competition_id = c.id
-      LEFT JOIN match_categories mc ON c.match_category_id = mc.id
-      WHERE 
-        (m.match_status_id = 1 AND m.date_start >= NOW())  -- ✅ Upcoming matches must be in the future
-        OR m.match_status_id = 3  -- ✅ Live matches
-        OR m.match_status_id = 2  -- ✅ Completed matches
-        OR m.match_status_id = 4  -- ✅ Cancelled matches
-      ORDER BY 
-        CASE 
-          WHEN m.match_status_id = 1 THEN 1  -- ✅ Upcoming Matches First
-          WHEN m.match_status_id = 3 THEN 2  -- ✅ Live Matches Second
-          WHEN m.match_status_id = 2 THEN 3  -- ✅ Completed Matches Third
-          WHEN m.match_status_id = 4 THEN 4  -- ✅ Cancelled Matches Last
-        END,
-        m.date_start ASC  -- ✅ Sort by upcoming date within each status
-      LIMIT ? OFFSET ?
+        venues.id AS venue_id, venues.name AS venue_name, venues.city AS venue_city, venues.country AS venue_country,
+        competitions.id AS competition_id, competitions.name AS competition_name, competitions.abbr AS competition_abbr, 
+        match_categories.id AS match_category_id, match_categories.name AS match_category_name
+      FROM matches
+      JOIN teams t1 ON matches.team_1 = t1.id
+      JOIN teams t2 ON matches.team_2 = t2.id
+      JOIN venues ON matches.venue_id = venues.id
+      LEFT JOIN competitions ON matches.competition_id = competitions.id
+      LEFT JOIN match_categories ON competitions.match_category_id = match_categories.id
+      WHERE ${statusCondition}
+      ORDER BY ${orderBy}
+      LIMIT ? OFFSET ?;
     `;
 
     console.log("🔹 Executing Query:", query);
-    console.log("🔹 Status Condition:", statusCondition);
+    console.log("🔹 Status:", status);
     console.log("🔹 Limit:", per_page, "Offset:", offset);
 
     const [matches] = await db.execute(query, [per_page, offset]);
 
     console.log("🔹 Matches Found:", matches.length);
 
-    const countQuery = `SELECT COUNT(*) AS total FROM matches WHERE (match_status_id = 1 AND date_start >= NOW()) OR match_status_id IN (2, 3, 4)`;
+    // ✅ Count Query for Pagination
+    const countQuery = `
+      SELECT COUNT(*) AS total 
+      FROM matches 
+      WHERE ${statusCondition};
+    `;
     const [countResult] = await db.execute(countQuery);
     const totalMatches = countResult[0].total;
     const totalPages = Math.ceil(totalMatches / per_page);
@@ -88,14 +91,14 @@ app.get("/matches/:status", async (req, res) => {
       per_page,
       page,
       total_pages: totalPages,
-      matches,
+      matches: matches,
     });
+
   } catch (error) {
     console.error("❌ Error fetching matches:", error.message);
     res.status(500).json({ message: "Server error" });
   }
 });
-
 
 
 
