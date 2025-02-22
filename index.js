@@ -524,14 +524,14 @@ app.get("/ground-conditions", async (req, res) => {
               SELECT v.id AS venue_id, v.name AS venue_name
               FROM matches m
               JOIN venues v ON m.venue_id = v.id
-              WHERE m.id = ?
+              WHERE m.api_id = ?
           ),
 
           last_5_matches AS (
               SELECT mi.id, mi.score_runs
               FROM match_innings mi
               WHERE mi.match_id IN (
-                  SELECT id FROM matches WHERE venue_id = (SELECT venue_id FROM venue_info)
+                  SELECT api_id FROM matches WHERE venue_id = (SELECT venue_id FROM venue_info)
               )
               ORDER BY mi.created_at DESC
               LIMIT 5
