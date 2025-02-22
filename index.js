@@ -47,6 +47,7 @@ app.get("/matches/:status", async (req, res) => {
     const query = `
       SELECT 
         matches.id AS match_id, 
+        matches.api_id AS api_id,
         matches.name AS title, 
         matches.date_start, 
         matches.match_status_id,
