@@ -137,7 +137,7 @@ app.get("/match/:match_id", async (req, res) => {
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
       JOIN venues v ON m.venue_id = v.id
-      WHERE m.id = ?
+      WHERE m.api_id = ?
     `;
 
     const [match] = await db.execute(query, [match_id]);
