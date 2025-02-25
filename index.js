@@ -576,7 +576,7 @@ app.get("/toss-trends", async (req, res) => {
               SELECT v.id AS venue_id, v.name AS venue_name
               FROM venues v
               JOIN matches m ON m.venue_id = v.id
-              WHERE m.id = ?
+              WHERE m.api_id = ?
           ),
 
           toss_decisions AS (
@@ -649,7 +649,7 @@ app.get("/toss-win-trends", async (req, res) => {
     const query = `
       WITH venue_matches AS (
           SELECT 
-              m.id AS match_id, 
+              m.api_id AS match_id, 
               m.venue_id, 
               m.team_1, 
               m.team_2, 
