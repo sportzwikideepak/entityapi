@@ -665,7 +665,7 @@ app.get("/toss-win-trends", async (req, res) => {
               m.winning_team_id
           FROM matches m
           LEFT JOIN teams t ON CAST(JSON_UNQUOTE(JSON_EXTRACT(m.toss, '$.winner')) AS UNSIGNED) = t.api_id
-          WHERE m.venue_id = (SELECT venue_id FROM matches WHERE id = ?)
+          WHERE m.venue_id = (SELECT venue_id FROM matches WHERE api_id = ?)
           AND m.toss IS NOT NULL
           AND m.winning_team_id IS NOT NULL
           AND m.match_status_id IN (2, 3, 4) 
@@ -718,6 +718,7 @@ app.get("/toss-win-trends", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 app.get("/suggested-players", async (req, res) => {
   try {
