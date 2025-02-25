@@ -119,24 +119,39 @@ app.get("/match/:match_id", async (req, res) => {
         m.date_start, 
         m.match_status_id, 
         m.weather,
+        m.format_str,  -- ✅ Fetch format string
+        f.name AS format_name,  -- ✅ Fetch format full name
+        f.description AS format_description,  -- ✅ Fetch format description
+
         t1.id AS teamA_id, 
         t1.name AS teamA_name, 
         t1.short_name AS teamA_short, 
         t1.slug AS teamA_slug, 
         t1.logo_url AS teamA_logo,  -- ✅ Fetch Team A Logo
+        
         t2.id AS teamB_id, 
         t2.name AS teamB_name, 
         t2.short_name AS teamB_short, 
         t2.slug AS teamB_slug, 
         t2.logo_url AS teamB_logo,  -- ✅ Fetch Team B Logo
+        
         v.id AS venue_id, 
         v.name AS venue_name, 
         v.city AS venue_city, 
-        v.country AS venue_country
+        v.country AS venue_country,
+
+        c.id AS competition_id,  -- ✅ Fetch competition ID
+        c.name AS competition_name,  -- ✅ Fetch competition name
+        c.type AS competition_type,  -- ✅ Fetch competition type
+        c.api_id AS competition_api_id  -- ✅ Fetch competition API ID
+
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
       JOIN venues v ON m.venue_id = v.id
+      LEFT JOIN formats f ON m.format_str = f.format_str  -- ✅ Join with formats table
+      LEFT JOIN competitions c ON m.competition_id = c.id  -- ✅ Join with competitions table
+      
       WHERE m.api_id = ?
     `;
 
@@ -152,6 +167,7 @@ app.get("/match/:match_id", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 
 // ✅ Fetch Live Scores for Ongoing Matches with Pagination
