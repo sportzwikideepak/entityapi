@@ -722,12 +722,21 @@ app.get("/toss-win-trends", async (req, res) => {
 
 app.get("/suggested-players", async (req, res) => {
   try {
-    const { match_id } = req.query;
+    let { match_id } = req.query; // ✅ Keep match_id in the request
 
     if (!match_id) {
       return res.status(400).json({ message: "match_id is required" });
     }
 
+    // ✅ Step 1: Check if match_id is actually an api_id and needs conversion
+    const matchQuery = `SELECT id FROM matches WHERE api_id = ? LIMIT 1`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]); // Using match_id as api_id
+
+    if (matchResult.length > 0) {
+      match_id = matchResult[0].id; // ✅ Convert api_id to actual match_id
+    }
+
+    // ✅ Step 2: Fetch suggested players using the actual match_id
     const query = `
       WITH player_squads AS (
           -- ✅ Get all players in the squad for the given match_id
@@ -753,7 +762,7 @@ app.get("/suggested-players", async (req, res) => {
           pfp.player_name,
           pfp.role,
           ps.team_id,  -- ✅ Fetch Team ID from match_squads
-          t.name AS team_name,  -- ✅ Corrected: Fetch Team Name from teams table
+          t.name AS team_name,  -- ✅ Fetch Team Name from teams table
           SUM(pfp.point) AS total_points,  -- ✅ Total fantasy points in last 5 matches
           AVG(pfp.point) AS avg_points,    -- ✅ Average fantasy points per match
           COUNT(pfp.match_id) AS matches_played  -- ✅ Matches counted (max 5)
@@ -762,7 +771,7 @@ app.get("/suggested-players", async (req, res) => {
           ON pfp.player_id = plm.player_id 
           AND pfp.match_id = plm.match_id
       JOIN player_squads ps ON pfp.player_id = ps.player_id  -- ✅ Join to get team_id
-      JOIN teams t ON ps.team_id = t.id  -- ✅ Join to fetch team_name correctly
+      JOIN teams t ON ps.team_id = t.id  -- ✅ Fetch Team Name from teams table
       GROUP BY pfp.player_id, pfp.player_name, pfp.role, ps.team_id, t.name
       ORDER BY total_points DESC;
     `;
@@ -776,7 +785,7 @@ app.get("/suggested-players", async (req, res) => {
     }
 
     res.json({
-      match_id: match_id,
+      match_id: match_id, // ✅ Keeping match_id in response
       players: results.map((player) => ({
         player_id: player.player_id,
         player_name: player.player_name,
@@ -794,33 +803,49 @@ app.get("/suggested-players", async (req, res) => {
   }
 });
 
+
+
 app.get("/top-players-venue", async (req, res) => {
   try {
-    const { match_id } = req.query;
+    let { match_id } = req.query; // ✅ Keep match_id in the request
 
     if (!match_id) {
       return res.status(400).json({ message: "match_id is required" });
     }
 
+    // ✅ Step 1: Convert api_id to match_id if needed
+    const matchQuery = `SELECT id FROM matches WHERE api_id = ? LIMIT 1`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]); // Using match_id as api_id
+
+    if (matchResult.length > 0) {
+      match_id = matchResult[0].id; // ✅ Convert api_id to actual match_id
+    }
+
+    // ✅ Step 2: Fetch top players at the venue using match_id
     const query = `
       WITH venue_info AS (
           -- ✅ Get venue_id for the given match_id
           SELECT venue_id FROM matches WHERE id = ?
       ),
 
+      player_squads AS (
+          -- ✅ Get all players in the squad for the given match_id
+          SELECT player_id, team_id FROM match_squads WHERE match_id = ?
+      ),
+
       player_venue_matches AS (
           -- ✅ Fetch last matches played at this venue
           SELECT 
               pfp.player_id,
-              pfp.player_name,  -- ✅ Fetch player name
+              pfp.player_name,
               pfp.match_id,
-              ms.team_id,  -- ✅ Fetch team_id from match_squads
+              ps.team_id,  -- ✅ Fetch team_id from match_squads
               pfp.point AS fantasy_points
           FROM match_fantasy_points pfp
           JOIN matches m ON pfp.match_id = m.id
-          JOIN match_squads ms ON pfp.player_id = ms.player_id AND pfp.match_id = ms.match_id  -- ✅ Ensure correct player-team mapping
+          JOIN player_squads ps ON pfp.player_id = ps.player_id  -- ✅ Ensure correct player-team mapping
           WHERE m.venue_id = (SELECT venue_id FROM venue_info)
-          ORDER BY m.date_start DESC  -- ✅ Most recent matches first
+          ORDER BY m.date_start DESC
       ),
 
       player_total_points AS (
@@ -829,7 +854,7 @@ app.get("/top-players-venue", async (req, res) => {
               pfp.player_id,
               pfp.player_name,
               pfp.team_id,
-              t.name AS team_name,
+              t.name AS team_name,  -- ✅ Fetch correct team name
               SUM(pfp.fantasy_points) AS total_points,
               COUNT(pfp.match_id) AS matches_played
           FROM player_venue_matches pfp
@@ -850,7 +875,7 @@ app.get("/top-players-venue", async (req, res) => {
       LIMIT 5;
     `;
 
-    const [results] = await db.execute(query, [match_id]);
+    const [results] = await db.execute(query, [match_id, match_id]); // ✅ Pass match_id twice for venue and squads
 
     if (results.length === 0) {
       return res
@@ -859,7 +884,7 @@ app.get("/top-players-venue", async (req, res) => {
     }
 
     res.json({
-      match_id: match_id,
+      match_id: match_id,  // ✅ Keeping match_id in response
       top_players: results.map((player) => ({
         player_id: player.player_id,
         player_name: player.player_name,
@@ -877,6 +902,8 @@ app.get("/top-players-venue", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
 
 // ---------------------------------------------------stats payground------------------------------------------------
 
