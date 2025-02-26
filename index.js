@@ -173,15 +173,11 @@ app.get("/match/:match_id", async (req, res) => {
 
         t1.id AS teamA_id, 
         t1.name AS teamA_name, 
-        t1.short_name AS teamA_short, 
-        t1.slug AS teamA_slug, 
-        t1.logo_url AS teamA_logo,  
+        t1.logo_url AS teamA_logo, 
 
         t2.id AS teamB_id, 
         t2.name AS teamB_name, 
-        t2.short_name AS teamB_short, 
-        t2.slug AS teamB_slug, 
-        t2.logo_url AS teamB_logo  
+        t2.logo_url AS teamB_logo 
 
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
@@ -198,23 +194,30 @@ app.get("/match/:match_id", async (req, res) => {
 
     const matchData = matchResult[0];
 
-    // Now fetch innings data using match_id from match_innings table
+    // Fetch innings data using match_id from match_innings table
     const inningsQuery = `
       SELECT 
         mi.batting_team_id, 
-        t.id AS team_id, /* FIX: Map batting_team_id correctly */
-        t.name AS team_name, /* FIX: Get correct team name */
+        t.id AS team_id, 
+        t.name AS team_name, 
+        t.logo_url AS team_logo, /* Ensure logo is fetched */
         mi.number AS innings_number,  
         mi.scores_full AS scores_full,  
         mi.scores AS scores,  
         mi.score_runs AS score_runs  
 
       FROM match_innings mi
-      LEFT JOIN teams t ON mi.batting_team_id = t.id /* FIX: Match using teams.id instead of api_id */
+      LEFT JOIN teams t ON mi.batting_team_id = t.id 
       WHERE mi.match_id = ?
     `;
 
     const [inningsResult] = await db.execute(inningsQuery, [matchData.match_id]);
+
+    // Function to fix logo URLs if needed
+    const fixLogoURL = (url) => {
+      if (!url) return null; // If URL is null, return null
+      return url.startsWith("http") ? url : `https://cricketaddictor.com${url}`;
+    };
 
     // Build response
     const match = {
@@ -231,19 +234,16 @@ app.get("/match/:match_id", async (req, res) => {
 
       teamA_id: matchData.teamA_id,
       teamA_name: matchData.teamA_name,
-      teamA_logo: matchData.teamA_logo.startsWith("https://") 
-        ? matchData.teamA_logo 
-        : `https://cricketaddictor.com/images/team/logo/${matchData.teamA_slug}-cricket.jpg?_t=1714384820`,
+      teamA_logo: fixLogoURL(matchData.teamA_logo), // Fix logo
 
       teamB_id: matchData.teamB_id,
       teamB_name: matchData.teamB_name,
-      teamB_logo: matchData.teamB_logo.startsWith("https://") 
-        ? matchData.teamB_logo 
-        : `https://cricketaddictor.com/images/team/logo/${matchData.teamB_slug}-cricket.jpg?_t=1714384820`,
+      teamB_logo: fixLogoURL(matchData.teamB_logo), // Fix logo
 
       innings: inningsResult.map(row => ({
-        batting_team_id: row.team_id, /* FIXED: Correct team ID */
-        team_name: row.team_name, /* FIXED: Correct team name */
+        batting_team_id: row.team_id, 
+        team_name: row.team_name, 
+        team_logo: fixLogoURL(row.team_logo), // Ensure innings team logo is correct
         innings_number: row.innings_number,
         scores_full: row.scores_full,
         scores: row.scores,
@@ -257,7 +257,6 @@ app.get("/match/:match_id", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
 
 
 
