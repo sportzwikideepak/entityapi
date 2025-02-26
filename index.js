@@ -153,12 +153,12 @@ app.get("/matches/:status", async (req, res) => {
 //   }
 // });
 
-
 app.get("/match/:match_id", async (req, res) => {
   try {
     const { match_id } = req.params;
 
-    const query = `
+    // First, fetch match_id from matches table using api_id
+    const matchQuery = `
       SELECT 
         m.id AS match_id, 
         m.api_id, 
@@ -167,10 +167,9 @@ app.get("/match/:match_id", async (req, res) => {
         m.match_status_id, 
         m.weather,
         m.format_str,  
-
-        f.id AS format_id,  
-        f.name AS format_name,  
-        f.description AS format_description,  
+        m.competition_id,
+        c.name AS competition_name,
+        c.type AS competition_type,
 
         t1.id AS teamA_id, 
         t1.name AS teamA_name, 
@@ -182,80 +181,75 @@ app.get("/match/:match_id", async (req, res) => {
         t2.name AS teamB_name, 
         t2.short_name AS teamB_short, 
         t2.slug AS teamB_slug, 
-        t2.logo_url AS teamB_logo,  
-
-        v.id AS venue_id, 
-        v.name AS venue_name, 
-        v.city AS venue_city, 
-        v.country AS venue_country,
-
-        c.id AS competition_id,  
-        c.name AS competition_name,  
-        c.type AS competition_type,  
-        c.api_id AS competition_api_id,  
-
-        mi.number AS number, /* Kept same column name */
-        mi.batting_team_id AS batting_team_id, /* Kept same column name */
-        mi.scores_full AS scores_full,  
-        mi.scores AS scores,  
-        mi.score_runs AS score_runs  
+        t2.logo_url AS teamB_logo  
 
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
-      JOIN venues v ON m.venue_id = v.id
-      LEFT JOIN formats f ON m.format_str = f.id  
       LEFT JOIN competitions c ON m.competition_id = c.id  
-      LEFT JOIN match_innings mi ON m.api_id = mi.api_id /* FIXED join with api_id */
-
       WHERE m.api_id = ?
     `;
 
-    const [matchData] = await db.execute(query, [match_id]);
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
 
-    if (matchData.length === 0) {
+    if (matchResult.length === 0) {
       return res.status(404).json({ message: "Match not found" });
     }
 
-    // Extract match info
+    const matchData = matchResult[0];
+
+    // Now fetch innings data using match_id from match_innings table
+    const inningsQuery = `
+      SELECT 
+        mi.batting_team_id, 
+        t.id AS team_id, /* FIX: Map batting_team_id correctly */
+        t.name AS team_name, /* FIX: Get correct team name */
+        mi.number AS innings_number,  
+        mi.scores_full AS scores_full,  
+        mi.scores AS scores,  
+        mi.score_runs AS score_runs  
+
+      FROM match_innings mi
+      LEFT JOIN teams t ON mi.batting_team_id = t.id /* FIX: Match using teams.id instead of api_id */
+      WHERE mi.match_id = ?
+    `;
+
+    const [inningsResult] = await db.execute(inningsQuery, [matchData.match_id]);
+
+    // Build response
     const match = {
-      match_id: matchData[0].match_id,
-      api_id: matchData[0].api_id,
-      title: matchData[0].title,
-      date_start: matchData[0].date_start,
-      match_status_id: matchData[0].match_status_id,
-      weather: matchData[0].weather,
-      format_str: matchData[0].format_str,
-      competition_id: matchData[0].competition_id,
-      competition_name: matchData[0].competition_name,
-      competition_type: matchData[0].competition_type,
+      match_id: matchData.match_id,
+      api_id: matchData.api_id,
+      title: matchData.title,
+      date_start: matchData.date_start,
+      match_status_id: matchData.match_status_id,
+      weather: matchData.weather,
+      format_str: matchData.format_str,
+      competition_id: matchData.competition_id,
+      competition_name: matchData.competition_name,
+      competition_type: matchData.competition_type,
 
-      teamA_id: matchData[0].teamA_id,
-      teamA_name: matchData[0].teamA_name,
-      teamA_logo: matchData[0].teamA_logo.startsWith("https://") 
-        ? matchData[0].teamA_logo 
-        : `https://cricketaddictor.com/images/team/logo/${matchData[0].teamA_slug}-cricket.jpg?_t=1714384820`,
+      teamA_id: matchData.teamA_id,
+      teamA_name: matchData.teamA_name,
+      teamA_logo: matchData.teamA_logo.startsWith("https://") 
+        ? matchData.teamA_logo 
+        : `https://cricketaddictor.com/images/team/logo/${matchData.teamA_slug}-cricket.jpg?_t=1714384820`,
 
-      teamB_id: matchData[0].teamB_id,
-      teamB_name: matchData[0].teamB_name,
-      teamB_logo: matchData[0].teamB_logo.startsWith("https://") 
-        ? matchData[0].teamB_logo 
-        : `https://cricketaddictor.com/images/team/logo/${matchData[0].teamB_slug}-cricket.jpg?_t=1714384820`,
+      teamB_id: matchData.teamB_id,
+      teamB_name: matchData.teamB_name,
+      teamB_logo: matchData.teamB_logo.startsWith("https://") 
+        ? matchData.teamB_logo 
+        : `https://cricketaddictor.com/images/team/logo/${matchData.teamB_slug}-cricket.jpg?_t=1714384820`,
 
-      innings: []
-    };
-
-    // Process innings data
-    matchData.forEach((row) => {
-      match.innings.push({
-        batting_team_id: row.batting_team_id, /* Kept same column name */
-        team_name: row.batting_team_id === match.teamA_id ? match.teamA_name : match.teamB_name,
-        number: row.number, /* Kept same column name */
+      innings: inningsResult.map(row => ({
+        batting_team_id: row.team_id, /* FIXED: Correct team ID */
+        team_name: row.team_name, /* FIXED: Correct team name */
+        innings_number: row.innings_number,
         scores_full: row.scores_full,
         scores: row.scores,
         score_runs: row.score_runs,
-      });
-    });
+      }))
+    };
 
     res.json(match);
   } catch (error) {
@@ -263,6 +257,10 @@ app.get("/match/:match_id", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+
+
 
 
 
