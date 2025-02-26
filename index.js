@@ -173,15 +173,13 @@ app.get("/match/:match_id", async (req, res) => {
 
         t1.id AS teamA_id, 
         t1.name AS teamA_name, 
-        t1.logo_url AS teamA_logo, 
         t1.short_name AS teamA_short,  /* ADDED short team name */
-
+        t1.logo_url AS teamA_logo, 
 
         t2.id AS teamB_id, 
         t2.name AS teamB_name, 
-        t2.logo_url AS teamB_logo 
         t2.short_name AS teamB_short,  /* ADDED short team name */
-
+        t2.logo_url AS teamB_logo 
 
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
@@ -204,7 +202,8 @@ app.get("/match/:match_id", async (req, res) => {
         mi.batting_team_id, 
         t.id AS team_id, 
         t.name AS team_name, 
-        t.logo_url AS team_logo, /* Ensure logo is fetched */
+        t.short_name AS team_short, /* ADDED short name for innings */
+        t.logo_url AS team_logo, 
         mi.number AS innings_number,  
         mi.scores_full AS scores_full,  
         mi.scores AS scores,  
@@ -238,16 +237,19 @@ app.get("/match/:match_id", async (req, res) => {
 
       teamA_id: matchData.teamA_id,
       teamA_name: matchData.teamA_name,
-      teamA_logo: fixLogoURL(matchData.teamA_logo), // Fix logo
+      teamA_short: matchData.teamA_short,  /* INCLUDED */
+      teamA_logo: fixLogoURL(matchData.teamA_logo), 
 
       teamB_id: matchData.teamB_id,
       teamB_name: matchData.teamB_name,
-      teamB_logo: fixLogoURL(matchData.teamB_logo), // Fix logo
+      teamB_short: matchData.teamB_short,  /* INCLUDED */
+      teamB_logo: fixLogoURL(matchData.teamB_logo), 
 
       innings: inningsResult.map(row => ({
         batting_team_id: row.team_id, 
         team_name: row.team_name, 
-        team_logo: fixLogoURL(row.team_logo), // Ensure innings team logo is correct
+        team_short: row.team_short,  /* INCLUDED */
+        team_logo: fixLogoURL(row.team_logo), 
         innings_number: row.innings_number,
         scores_full: row.scores_full,
         scores: row.scores,
