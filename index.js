@@ -154,7 +154,6 @@ app.get("/matches/:status", async (req, res) => {
 // });
 
 
-
 app.get("/match/:match_id", async (req, res) => {
   try {
     const { match_id } = req.params;
@@ -162,6 +161,7 @@ app.get("/match/:match_id", async (req, res) => {
     const query = `
       SELECT 
         m.id AS match_id, 
+        m.api_id, 
         m.name AS title, 
         m.date_start, 
         m.match_status_id, 
@@ -194,9 +194,11 @@ app.get("/match/:match_id", async (req, res) => {
         c.type AS competition_type,  
         c.api_id AS competition_api_id,  
 
-        mi.scores_full AS scores_full,  /* Full Scores */
-        mi.scores AS scores,  /* General Scores */
-        mi.score_runs AS score_runs  /* Runs Scored */
+        mi.number AS number, /* Kept same column name */
+        mi.batting_team_id AS batting_team_id, /* Kept same column name */
+        mi.scores_full AS scores_full,  
+        mi.scores AS scores,  
+        mi.score_runs AS score_runs  
 
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
@@ -204,28 +206,65 @@ app.get("/match/:match_id", async (req, res) => {
       JOIN venues v ON m.venue_id = v.id
       LEFT JOIN formats f ON m.format_str = f.id  
       LEFT JOIN competitions c ON m.competition_id = c.id  
-      LEFT JOIN match_innings mi ON m.api_id = mi.api_id /* Joining with match_innings */
+      LEFT JOIN match_innings mi ON m.api_id = mi.api_id /* FIXED join with api_id */
 
       WHERE m.api_id = ?
     `;
 
-    const [match] = await db.execute(query, [match_id]);
+    const [matchData] = await db.execute(query, [match_id]);
 
-    if (match.length === 0) {
+    if (matchData.length === 0) {
       return res.status(404).json({ message: "Match not found" });
     }
 
-    // Check and update logo URLs if they don't have "https://"
-    const baseUrl = "https://cricketaddictor.com/images/team/logo/";
-    match[0].teamA_logo = match[0].teamA_logo.startsWith("https://") ? match[0].teamA_logo : `${baseUrl}${match[0].teamA_slug}-cricket.jpg?_t=1714384820`;
-    match[0].teamB_logo = match[0].teamB_logo.startsWith("https://") ? match[0].teamB_logo : `${baseUrl}${match[0].teamB_slug}-cricket.jpg?_t=1714384820`;
+    // Extract match info
+    const match = {
+      match_id: matchData[0].match_id,
+      api_id: matchData[0].api_id,
+      title: matchData[0].title,
+      date_start: matchData[0].date_start,
+      match_status_id: matchData[0].match_status_id,
+      weather: matchData[0].weather,
+      format_str: matchData[0].format_str,
+      competition_id: matchData[0].competition_id,
+      competition_name: matchData[0].competition_name,
+      competition_type: matchData[0].competition_type,
 
-    res.json(match[0]);
+      teamA_id: matchData[0].teamA_id,
+      teamA_name: matchData[0].teamA_name,
+      teamA_logo: matchData[0].teamA_logo.startsWith("https://") 
+        ? matchData[0].teamA_logo 
+        : `https://cricketaddictor.com/images/team/logo/${matchData[0].teamA_slug}-cricket.jpg?_t=1714384820`,
+
+      teamB_id: matchData[0].teamB_id,
+      teamB_name: matchData[0].teamB_name,
+      teamB_logo: matchData[0].teamB_logo.startsWith("https://") 
+        ? matchData[0].teamB_logo 
+        : `https://cricketaddictor.com/images/team/logo/${matchData[0].teamB_slug}-cricket.jpg?_t=1714384820`,
+
+      innings: []
+    };
+
+    // Process innings data
+    matchData.forEach((row) => {
+      match.innings.push({
+        batting_team_id: row.batting_team_id, /* Kept same column name */
+        team_name: row.batting_team_id === match.teamA_id ? match.teamA_name : match.teamB_name,
+        number: row.number, /* Kept same column name */
+        scores_full: row.scores_full,
+        scores: row.scores,
+        score_runs: row.score_runs,
+      });
+    });
+
+    res.json(match);
   } catch (error) {
     console.error("❌ Error fetching match details:", error.message);
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
 
 
 
