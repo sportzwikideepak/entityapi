@@ -157,7 +157,7 @@ app.get("/match/:match_id", async (req, res) => {
   try {
     const { match_id } = req.params;
 
-    // First, fetch match_id from matches table using api_id
+    // Fetch match details including venue information
     const matchQuery = `
       SELECT 
         m.id AS match_id, 
@@ -173,18 +173,25 @@ app.get("/match/:match_id", async (req, res) => {
 
         t1.id AS teamA_id, 
         t1.name AS teamA_name, 
-        t1.short_name AS teamA_short,  /* ADDED short team name */
+        t1.short_name AS teamA_short,  
         t1.logo_url AS teamA_logo, 
 
         t2.id AS teamB_id, 
         t2.name AS teamB_name, 
-        t2.short_name AS teamB_short,  /* ADDED short team name */
-        t2.logo_url AS teamB_logo 
+        t2.short_name AS teamB_short,  
+        t2.logo_url AS teamB_logo, 
+        
+        v.id AS venue_id,
+        v.name AS venue_name,
+        v.city AS venue_city,
+        v.country AS venue_country,
+        v.capacity AS venue_capacity  /* ADDED Venue Details */
 
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
-      LEFT JOIN competitions c ON m.competition_id = c.id  
+      LEFT JOIN competitions c ON m.competition_id = c.id
+      LEFT JOIN venues v ON m.venue_id = v.id  /* ADDED Venue Join */
       WHERE m.api_id = ?
     `;
 
@@ -202,7 +209,7 @@ app.get("/match/:match_id", async (req, res) => {
         mi.batting_team_id, 
         t.id AS team_id, 
         t.name AS team_name, 
-        t.short_name AS team_short, /* ADDED short name for innings */
+        t.short_name AS team_short,  
         t.logo_url AS team_logo, 
         mi.number AS innings_number,  
         mi.scores_full AS scores_full,  
@@ -237,18 +244,26 @@ app.get("/match/:match_id", async (req, res) => {
 
       teamA_id: matchData.teamA_id,
       teamA_name: matchData.teamA_name,
-      teamA_short: matchData.teamA_short,  /* INCLUDED */
+      teamA_short: matchData.teamA_short,  
       teamA_logo: fixLogoURL(matchData.teamA_logo), 
 
       teamB_id: matchData.teamB_id,
       teamB_name: matchData.teamB_name,
-      teamB_short: matchData.teamB_short,  /* INCLUDED */
+      teamB_short: matchData.teamB_short,  
       teamB_logo: fixLogoURL(matchData.teamB_logo), 
+
+      venue: {
+        venue_id: matchData.venue_id,
+        venue_name: matchData.venue_name,
+        venue_city: matchData.venue_city,
+        venue_country: matchData.venue_country,
+        venue_capacity: matchData.venue_capacity
+      },
 
       innings: inningsResult.map(row => ({
         batting_team_id: row.team_id, 
         team_name: row.team_name, 
-        team_short: row.team_short,  /* INCLUDED */
+        team_short: row.team_short,  
         team_logo: fixLogoURL(row.team_logo), 
         innings_number: row.innings_number,
         scores_full: row.scores_full,
