@@ -192,14 +192,19 @@ app.get("/match/:match_id", async (req, res) => {
         c.id AS competition_id,  
         c.name AS competition_name,  
         c.type AS competition_type,  
-        c.api_id AS competition_api_id  
+        c.api_id AS competition_api_id,  
+
+        mi.scores_full AS scores_full,  /* Full Scores */
+        mi.scores AS scores,  /* General Scores */
+        mi.score_runs AS score_runs  /* Runs Scored */
 
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
       JOIN venues v ON m.venue_id = v.id
-      LEFT JOIN formats f ON m.format_str = f.id  /* Fixed: Join using f.id */
+      LEFT JOIN formats f ON m.format_str = f.id  
       LEFT JOIN competitions c ON m.competition_id = c.id  
+      LEFT JOIN match_innings mi ON m.api_id = mi.api_id /* Joining with match_innings */
 
       WHERE m.api_id = ?
     `;
@@ -209,7 +214,12 @@ app.get("/match/:match_id", async (req, res) => {
     if (match.length === 0) {
       return res.status(404).json({ message: "Match not found" });
     }
-///
+
+    // Check and update logo URLs if they don't have "https://"
+    const baseUrl = "https://cricketaddictor.com/images/team/logo/";
+    match[0].teamA_logo = match[0].teamA_logo.startsWith("https://") ? match[0].teamA_logo : `${baseUrl}${match[0].teamA_slug}-cricket.jpg?_t=1714384820`;
+    match[0].teamB_logo = match[0].teamB_logo.startsWith("https://") ? match[0].teamB_logo : `${baseUrl}${match[0].teamB_slug}-cricket.jpg?_t=1714384820`;
+
     res.json(match[0]);
   } catch (error) {
     console.error("❌ Error fetching match details:", error.message);
