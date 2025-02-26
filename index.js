@@ -174,10 +174,14 @@ app.get("/match/:match_id", async (req, res) => {
         t1.id AS teamA_id, 
         t1.name AS teamA_name, 
         t1.logo_url AS teamA_logo, 
+        t1.short_name AS teamA_short,  /* ADDED short team name */
+
 
         t2.id AS teamB_id, 
         t2.name AS teamB_name, 
         t2.logo_url AS teamB_logo 
+        t2.short_name AS teamB_short,  /* ADDED short team name */
+
 
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
