@@ -167,6 +167,7 @@ app.get("/match/:match_id", async (req, res) => {
         m.match_status_id, 
         m.weather,
         m.format_str,  
+        m.api_id
 
         f.id AS format_id,  
         f.name AS format_name,  
