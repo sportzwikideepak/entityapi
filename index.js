@@ -485,7 +485,7 @@ app.get("/match/:match_id/squads", async (req, res) => {
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
-      WHERE m.id = ?
+      WHERE m.api_id = ?
     `;
     const [matchData] = await db.execute(matchQuery, [match_id]);
 
@@ -1042,87 +1042,7 @@ app.get("/top-players-venue", async (req, res) => {
 
 // ---------------------------------------------------stats payground------------------------------------------------
 
-// app.get("/stats", async (req, res) => {
-//   try {
-//     const { match_id } = req.query;
 
-//     if (!match_id) {
-//       return res.status(400).json({ error: "match_id is required." });
-//     }
-
-//     const query = `
-//       WITH player_squads AS (
-//           -- ✅ Get all players in the squad for the given match_id
-//           SELECT player_id, team_id
-//           FROM match_squads
-//           WHERE match_id = ?
-//       ),
-
-//       player_last_matches AS (
-//           -- ✅ Get last 5 matches per player using ROW_NUMBER()
-//           SELECT player_id, match_id
-//           FROM (
-//               SELECT
-//                   pfp.player_id,
-//                   pfp.match_id,
-//                   ROW_NUMBER() OVER (PARTITION BY pfp.player_id ORDER BY pfp.match_id DESC) AS row_num
-//               FROM match_fantasy_points pfp
-//               WHERE pfp.player_id IN (SELECT player_id FROM player_squads)
-//           ) ranked_matches
-//           WHERE row_num <= 5  -- ✅ Ensures only last 5 matches per player
-//       )
-
-//       SELECT
-//           ps.player_id,
-//           COALESCE(pfp.player_name, 'Unknown') AS player_name,  -- ✅ Handle new players
-//           COALESCE(pfp.role, 'Unknown') AS role,  -- ✅ Handle new players
-//           ps.team_id,  -- ✅ Fetch Team ID from match_squads
-//           COALESCE(t.name, 'Unknown') AS team_name,  -- ✅ Handle missing teams
-//           COALESCE(SUM(pfp.point), 0) AS total_points,  -- ✅ Total fantasy points in last 5 matches
-//           COALESCE(AVG(pfp.point), 0) AS avg_points,    -- ✅ Average fantasy points per match
-//           COALESCE(COUNT(DISTINCT plm.match_id), 0) AS matches_played,  -- ✅ Count only distinct matches
-//           COALESCE(SUM(bat.runs), 0) AS total_runs,  -- ✅ Total runs scored in last 5 matches
-//           COALESCE(SUM(bat.balls_faced), 0) AS total_balls_faced,  -- ✅ Total balls faced in last 5 matches
-//           COALESCE(SUM(bowl.wickets), 0) AS total_wickets,  -- ✅ Total wickets taken in last 5 matches
-//           COALESCE(SUM(bowl.runs_conceded), 0) AS total_runs_conceded,  -- ✅ Total runs conceded in last 5 matches
-//           COALESCE(SUM(bowl.overs), 0) AS total_overs_bowled,  -- ✅ Total overs bowled in last 5 matches
-//           -- ✅ Strike Rate Calculation (Avoid Division by Zero)
-//           CASE
-//               WHEN SUM(bat.balls_faced) > 0
-//               THEN ROUND((SUM(bat.runs) / SUM(bat.balls_faced)) * 100, 2)
-//               ELSE NULL
-//           END AS strike_rate,
-//           -- ✅ Economy Rate Calculation (Avoid Division by Zero)
-//           CASE
-//               WHEN SUM(bowl.overs) > 0
-//               THEN ROUND(SUM(bowl.runs_conceded) / SUM(bowl.overs), 2)
-//               ELSE NULL
-//           END AS economy_rate
-//       FROM player_squads ps
-//       LEFT JOIN player_last_matches plm
-//           ON ps.player_id = plm.player_id
-//       LEFT JOIN match_fantasy_points pfp
-//           ON plm.player_id = pfp.player_id
-//           AND plm.match_id = pfp.match_id
-//       LEFT JOIN teams t
-//           ON ps.team_id = t.id
-//       LEFT JOIN match_inning_batters bat  -- ✅ Fetch batting data
-//           ON ps.player_id = bat.batsman_id
-//           AND bat.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = plm.match_id)
-//       LEFT JOIN match_inning_bowlers bowl  -- ✅ Fetch bowling data
-//           ON ps.player_id = bowl.bowler_id
-//           AND bowl.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = plm.match_id)
-//       GROUP BY ps.player_id, pfp.player_name, pfp.role, ps.team_id, t.name
-//       ORDER BY total_points DESC;
-//     `;
-
-//     const [rows] = await db.execute(query, [match_id]);
-//     res.json(rows);
-//   } catch (error) {
-//     console.error("❌ Error fetching data:", error.message);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// });
 
 const getStatField = (statType) => {
   switch (statType) {
