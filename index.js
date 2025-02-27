@@ -2694,78 +2694,82 @@ app.get('/key-insight', async (req, res) => {
 
 // --------------------captain vice captain home page-------------------------------
 
-app.get("/match/:match_id/captain-vice-captain", async (req, res) => {
+app.get("/match/:match_id/captains", async (req, res) => {
   try {
     const { match_id } = req.params;
 
-    // Fetch squads for today's match
-    const squadsResponse = await fetch(
-      `https://lionfish-app-nny6k.ondigitalocean.app/match/${match_id}/squads`
-    );
-    if (!squadsResponse.ok) {
-      return res.status(500).json({ error: "Failed to fetch squads" });
+    // 🔹 Fetch match_id using api_id
+    const matchQuery = `
+      SELECT m.id AS match_id, m.api_id 
+      FROM matches m
+      WHERE m.api_id = ?
+    `;
+    const [matchData] = await db.execute(matchQuery, [match_id]);
+
+    if (matchData.length === 0) {
+      return res.status(404).json({ message: "Match not found" });
     }
-    const squadsData = await squadsResponse.json();
 
-    if (!squadsData || !squadsData.teams) {
-      return res.status(404).json({ error: "Squads not found" });
-    }
+    const match_id_actual = matchData[0].match_id;
 
-    // Extract all player IDs
-    const players = [
-      ...squadsData.teams.teamA.squad,
-      ...squadsData.teams.teamB.squad,
-    ].map((player) => player.player_id);
+    // 🔹 Fetch squad players for today's match
+    const squadQuery = `
+      SELECT ms.player_id, p.first_name, p.last_name, p.short_name, 
+             p.playing_role, ms.role_str, t.name AS team_name, t.short_name AS team_short
+      FROM match_squads ms
+      JOIN players p ON ms.player_id = p.id
+      JOIN teams t ON ms.team_id = t.id
+      WHERE ms.match_id = ?
+    `;
+    const [squadPlayers] = await db.execute(squadQuery, [match_id_actual]);
 
-    if (players.length === 0) {
-      return res.status(404).json({ error: "No players found in squads" });
+    if (squadPlayers.length === 0) {
+      return res.status(404).json({ message: "No players found in squads" });
     }
 
     let playerStats = [];
 
-    for (const playerId of players) {
+    for (const player of squadPlayers) {
+      const playerId = player.player_id;
+
+      // 🔹 Fetch total fantasy points in last 5 matches
       const last5MatchesQuery = `
         SELECT SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches 
         FROM (
           SELECT * FROM match_fantasy_points WHERE player_id = ? ORDER BY match_id DESC LIMIT 5
         ) as recent_matches`;
-
       const [overallPoints] = await db.execute(last5MatchesQuery, [playerId]);
 
       playerStats.push({
         player_id: playerId,
+        player_name: `${player.first_name} ${player.last_name || ""}`.trim(),
+        short_name: player.short_name,
+        team_name: player.team_name,  // 🔹 Team name included
+        team_short: player.team_short,  // 🔹 Short team name included
+        playing_role: player.playing_role,
+        role_str: player.role_str,
         total_points: overallPoints[0].total_points || 0,
         avg_points: overallPoints[0].avg_points || 0,
         total_matches: overallPoints[0].total_matches || 0,
       });
     }
 
-    // Sort players based on total fantasy points (highest first)
+    // 🔹 Sort players based on total fantasy points (highest first)
     playerStats.sort((a, b) => b.total_points - a.total_points);
 
-    if (playerStats.length === 0) {
-      return res.status(404).json({ error: "No fantasy data found for players" });
-    }
-
-    const captain = playerStats[0]; // Highest-scoring player
-    const viceCaptain = playerStats[1] || null; // Second highest-scoring player
+    // 🔹 Select the **top player as Captain** and **2nd best as Vice-Captain**
+    const captain = playerStats.length > 0 ? playerStats[0] : null;
+    const viceCaptain = playerStats.length > 1 ? playerStats[1] : null;
 
     res.json({
-      captain: {
-        player_id: captain.player_id,
-        total_points: captain.total_points,
-        avg_points: captain.avg_points,
-      },
-      vice_captain: viceCaptain
-        ? {
-            player_id: viceCaptain.player_id,
-            total_points: viceCaptain.total_points,
-            avg_points: viceCaptain.avg_points,
-          }
-        : null, // If no second player, return null
+      match_id: match_id_actual,
+      api_id: match_id,
+      captain,
+      vice_captain: viceCaptain,
     });
   } catch (error) {
-    console.error("❌ Error fetching captain/vice-captain:", error.message);
-    res.status(500).json({ error: "Server error" });
+    console.error("❌ Error fetching captains:", error.message);
+    res.status(500).json({ message: "Server error" });
   }
 });
+
