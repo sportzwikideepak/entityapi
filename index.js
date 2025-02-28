@@ -334,26 +334,166 @@ app.get("/matches/live/scores", async (req, res) => {
 });
 
 //FETCH MATCH SCORECARD
+// app.get("/match/:match_id/scorecard", async (req, res) => {
+//   try {
+//     const { match_id } = req.params;
+
+//     // 🔹 Fetch Match Details
+//     const matchQuery = `
+//       SELECT 
+//         m.id AS match_id, m.name AS match_title, 
+//         t1.id AS teamA_id, t1.name AS teamA_name, t1.short_name AS teamA_short, t1.logo_url AS teamA_logo,
+//         t2.id AS teamB_id, t2.name AS teamB_name, t2.short_name AS teamB_short, t2.logo_url AS teamB_logo
+//       FROM matches m
+//       JOIN teams t1 ON m.team_1 = t1.id
+//       JOIN teams t2 ON m.team_2 = t2.id
+//       WHERE m.id = ?
+//     `;
+//     const [matchData] = await db.execute(matchQuery, [match_id]);
+
+//     if (matchData.length === 0) {
+//       return res.status(404).json({ message: "Match not found" });
+//     }
+
+//     // 🔹 Fetch Innings Data
+//     const inningsQuery = `
+//       SELECT 
+//         i.id AS inning_id, i.number AS inning_number, i.batting_team_id, 
+//         t.name AS team_name, i.scores, i.score_runs, i.scores_full
+//       FROM match_innings i
+//       JOIN teams t ON i.batting_team_id = t.id
+//       WHERE i.match_id = ?
+//       ORDER BY i.number
+//     `;
+//     const [inningsData] = await db.execute(inningsQuery, [match_id]);
+
+//     // 🔹 Fetch Batting Data from `match_inning_batters`
+//     const battingQuery = `
+//       SELECT 
+//         b.id AS batting_id, b.match_inning_id, p.first_name, p.last_name, 
+//         b.runs, b.balls_faced AS balls, b.fours, b.sixes, b.strike_rate, 
+//         b.how_out, p.image AS player_image
+//       FROM match_inning_batters b
+//       JOIN players p ON b.batsman_id = p.id
+//       WHERE b.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = ?)
+//       ORDER BY b.match_inning_id, b.id
+//     `;
+//     const [battingData] = await db.execute(battingQuery, [match_id]);
+
+//     // 🔹 Fetch Bowling Data from `match_inning_bowlers`
+//     const bowlingQuery = `
+//       SELECT 
+//         bo.id AS bowling_id, bo.match_inning_id, p.first_name, p.last_name, 
+//         bo.overs, bo.runs_conceded AS runs, bo.wickets, bo.econ AS economy, 
+//         p.image AS player_image
+//       FROM match_inning_bowlers bo
+//       JOIN players p ON bo.bowler_id = p.id
+//       WHERE bo.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = ?)
+//       ORDER BY bo.match_inning_id, bo.id
+//     `;
+//     const [bowlingData] = await db.execute(bowlingQuery, [match_id]);
+
+//     // 🔹 Fetch Fall of Wicket Data from `match_inning_fows`
+//     const fowQuery = `
+//       SELECT 
+//         f.match_inning_id, p.first_name, p.last_name, f.runs, f.balls, 
+//         f.how_out, f.score_at_dismissal, f.overs_at_dismissal
+//       FROM match_inning_fows f
+//       JOIN players p ON f.batsman_id = p.id
+//       WHERE f.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = ?)
+//       ORDER BY f.match_inning_id, f.number
+//     `;
+//     const [fowData] = await db.execute(fowQuery, [match_id]);
+
+//     // 🔹 Structure Response
+//     const innings = inningsData.map((inning) => ({
+//       inning_number: inning.inning_number,
+//       team_name: inning.team_name,
+//       scores: inning.scores,
+//       runs: inning.score_runs,
+//       scores_full: inning.scores_full,
+//       batting: battingData
+//         .filter((b) => b.match_inning_id === inning.inning_id)
+//         .map((b) => ({
+//           player_name: `${b.first_name} ${b.last_name}`,
+//           runs: b.runs,
+//           balls: b.balls,
+//           fours: b.fours,
+//           sixes: b.sixes,
+//           strike_rate: b.strike_rate,
+//           how_out: b.how_out,
+//           player_image: b.player_image,
+//         })),
+//       bowling: bowlingData
+//         .filter((b) => b.match_inning_id === inning.inning_id)
+//         .map((b) => ({
+//           player_name: `${b.first_name} ${b.last_name}`,
+//           overs: b.overs,
+//           runs: b.runs,
+//           wickets: b.wickets,
+//           economy: b.economy,
+//           player_image: b.player_image,
+//         })),
+//       fall_of_wickets: fowData
+//         .filter((f) => f.match_inning_id === inning.inning_id)
+//         .map((f) => ({
+//           player_name: `${f.first_name} ${f.last_name}`,
+//           runs: f.runs,
+//           balls: f.balls,
+//           how_out: f.how_out,
+//           score_at_dismissal: f.score_at_dismissal,
+//           overs_at_dismissal: f.overs_at_dismissal,
+//         })),
+//     }));
+
+//     res.json({
+//       match_id: matchData[0].match_id,
+//       match_title: matchData[0].match_title,
+//       teams: {
+//         teamA: {
+//           id: matchData[0].teamA_id,
+//           name: matchData[0].teamA_name,
+//           short_name: matchData[0].teamA_short,
+//           logo_url: matchData[0].teamA_logo,
+//         },
+//         teamB: {
+//           id: matchData[0].teamB_id,
+//           name: matchData[0].teamB_name,
+//           short_name: matchData[0].teamB_short,
+//           logo_url: matchData[0].teamB_logo,
+//         },
+//       },
+//       innings,
+//     });
+//   } catch (error) {
+//     console.error("❌ Error fetching scorecard:", error.message);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
 app.get("/match/:match_id/scorecard", async (req, res) => {
   try {
     const { match_id } = req.params;
 
-    // 🔹 Fetch Match Details
+    // 🔹 Fetch Match Details using api_id
     const matchQuery = `
       SELECT 
-        m.id AS match_id, m.name AS match_title, 
+        m.id AS match_id, m.api_id, m.name AS match_title, 
         t1.id AS teamA_id, t1.name AS teamA_name, t1.short_name AS teamA_short, t1.logo_url AS teamA_logo,
         t2.id AS teamB_id, t2.name AS teamB_name, t2.short_name AS teamB_short, t2.logo_url AS teamB_logo
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
-      WHERE m.id = ?
+      WHERE m.api_id = ?
     `;
+
     const [matchData] = await db.execute(matchQuery, [match_id]);
 
     if (matchData.length === 0) {
       return res.status(404).json({ message: "Match not found" });
     }
+
+    const actual_match_id = matchData[0].match_id; // Fetch the actual match_id
 
     // 🔹 Fetch Innings Data
     const inningsQuery = `
@@ -365,9 +505,9 @@ app.get("/match/:match_id/scorecard", async (req, res) => {
       WHERE i.match_id = ?
       ORDER BY i.number
     `;
-    const [inningsData] = await db.execute(inningsQuery, [match_id]);
+    const [inningsData] = await db.execute(inningsQuery, [actual_match_id]);
 
-    // 🔹 Fetch Batting Data from `match_inning_batters`
+    // 🔹 Fetch Batting Data
     const battingQuery = `
       SELECT 
         b.id AS batting_id, b.match_inning_id, p.first_name, p.last_name, 
@@ -378,9 +518,9 @@ app.get("/match/:match_id/scorecard", async (req, res) => {
       WHERE b.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = ?)
       ORDER BY b.match_inning_id, b.id
     `;
-    const [battingData] = await db.execute(battingQuery, [match_id]);
+    const [battingData] = await db.execute(battingQuery, [actual_match_id]);
 
-    // 🔹 Fetch Bowling Data from `match_inning_bowlers`
+    // 🔹 Fetch Bowling Data
     const bowlingQuery = `
       SELECT 
         bo.id AS bowling_id, bo.match_inning_id, p.first_name, p.last_name, 
@@ -391,9 +531,9 @@ app.get("/match/:match_id/scorecard", async (req, res) => {
       WHERE bo.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = ?)
       ORDER BY bo.match_inning_id, bo.id
     `;
-    const [bowlingData] = await db.execute(bowlingQuery, [match_id]);
+    const [bowlingData] = await db.execute(bowlingQuery, [actual_match_id]);
 
-    // 🔹 Fetch Fall of Wicket Data from `match_inning_fows`
+    // 🔹 Fetch Fall of Wicket Data
     const fowQuery = `
       SELECT 
         f.match_inning_id, p.first_name, p.last_name, f.runs, f.balls, 
@@ -403,7 +543,7 @@ app.get("/match/:match_id/scorecard", async (req, res) => {
       WHERE f.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = ?)
       ORDER BY f.match_inning_id, f.number
     `;
-    const [fowData] = await db.execute(fowQuery, [match_id]);
+    const [fowData] = await db.execute(fowQuery, [actual_match_id]);
 
     // 🔹 Structure Response
     const innings = inningsData.map((inning) => ({
@@ -448,6 +588,7 @@ app.get("/match/:match_id/scorecard", async (req, res) => {
 
     res.json({
       match_id: matchData[0].match_id,
+      api_id: matchData[0].api_id,
       match_title: matchData[0].match_title,
       teams: {
         teamA: {
@@ -470,6 +611,7 @@ app.get("/match/:match_id/scorecard", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 app.get("/match/:match_id/squads", async (req, res) => {
   try {
