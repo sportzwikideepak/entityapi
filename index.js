@@ -711,6 +711,112 @@ app.get("/match/:match_id/squads", async (req, res) => {
 
 
 
+
+app.get("/match/:match_id/player-stats-table", async (req, res) => {
+  try {
+    const { match_id } = req.params; // This is actually the api_id
+
+    // 🔹 Fetch `id` (our internal match ID) using `api_id`
+    const matchQuery = `SELECT id FROM matches WHERE api_id = ?`;
+    const [matchData] = await db.execute(matchQuery, [match_id]);
+
+    if (matchData.length === 0) {
+      return res.status(404).json({ message: "Match not found" });
+    }
+    const internal_match_id = matchData[0].id;
+
+    // 🔹 Fetch Squads
+    const squadQuery = `
+      SELECT ms.team_id, p.id AS player_id, p.first_name, 
+             p.short_name, p.playing_role, t.name AS team_name
+      FROM match_squads ms
+      JOIN players p ON ms.player_id = p.id
+      JOIN teams t ON ms.team_id = t.id
+      WHERE ms.match_id = ?
+    `;
+    const [squadData] = await db.execute(squadQuery, [internal_match_id]);
+
+    if (squadData.length === 0) {
+      return res.status(404).json({ message: "No players found in squads" });
+    }
+
+    // 🔹 Fetch Last 10 Matches for Each Player & Calculate Fantasy Points & DT%
+    const playerStats = await Promise.all(
+      squadData.map(async (player) => {
+        // Fetch last 10 matches for the player (Workaround: Use ORDER BY and fetch IDs first)
+        const lastMatchesQuery = `
+          SELECT match_id 
+          FROM match_fantasy_points 
+          WHERE player_id = ? 
+          ORDER BY match_id DESC 
+          LIMIT 10
+        `;
+        const [lastMatches] = await db.execute(lastMatchesQuery, [player.player_id]);
+
+        if (lastMatches.length === 0) {
+          return {
+            player_id: player.player_id,
+            player_name: player.first_name,
+            short_name: player.short_name,
+            playing_role: player.playing_role,
+            team_name: player.team_name,
+            total_matches: 0,
+            total_fantasy_points: 0,
+            dt_percentage: "0.00",
+          };
+        }
+
+        // Extract match IDs for the last 10 matches
+        const lastMatchIds = lastMatches.map((m) => m.match_id);
+
+        // Fetch total fantasy points
+        const fantasyPointsQuery = `
+          SELECT SUM(point) AS total_points 
+          FROM match_fantasy_points 
+          WHERE player_id = ? AND match_id IN (${lastMatchIds.join(",")})
+        `;
+        const [fantasyPointsData] = await db.execute(fantasyPointsQuery, [player.player_id]);
+
+        const totalFantasyPoints = fantasyPointsData[0].total_points || 0;
+
+        // Fetch Dream Team appearances separately
+        const dreamTeamQuery = `
+          SELECT COUNT(*) AS dream_team_count 
+          FROM match_dream_teams 
+          WHERE player_id = ? AND match_id IN (${lastMatchIds.join(",")})
+        `;
+        const [dreamTeamData] = await db.execute(dreamTeamQuery, [player.player_id]);
+
+        const dreamTeamAppearances = dreamTeamData[0].dream_team_count || 0;
+        const dtPercentage = lastMatches.length > 0 ? ((dreamTeamAppearances / lastMatches.length) * 100).toFixed(2) : 0;
+
+        return {
+          player_id: player.player_id,
+          player_name: player.first_name, // No last_name
+          short_name: player.short_name,
+          playing_role: player.playing_role,
+          team_name: player.team_name,
+          total_matches: lastMatches.length,
+          total_fantasy_points: totalFantasyPoints,
+          dt_percentage: dtPercentage,
+        };
+      })
+    );
+
+    // 🔹 Sort players by Total Fantasy Points (Descending Order)
+    const sortedPlayerStats = playerStats.sort((a, b) => b.total_fantasy_points - a.total_fantasy_points);
+
+    res.json({ match_id, internal_match_id, player_stats: sortedPlayerStats });
+  } catch (error) {
+    console.error("❌ Error fetching player stats:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+
+
+
 // WIN PERCNTAGEG BETWEEN TWO TEAMS LAST 5 MATCHES HOME OVERVIEW PAEG
 // GET http://localhost:5000/team-comparison?teamA=1&teamB=2
 
