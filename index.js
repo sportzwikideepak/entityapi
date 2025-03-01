@@ -3021,3 +3021,130 @@ app.get("/match/:match_id/captains", async (req, res) => {
   }
 });
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+// dream team
+
+app.get("/match/:match_id/best-11-players", async (req, res) => {
+  try {
+    const { match_id } = req.params; // This is the api_id
+
+    // 🔹 Get Internal Match ID
+    const matchQuery = `SELECT id FROM matches WHERE api_id = ?`;
+    const [matchData] = await db.execute(matchQuery, [match_id]);
+
+    if (matchData.length === 0) {
+      return res.status(404).json({ message: "Match not found" });
+    }
+    const internal_match_id = matchData[0].id;
+
+    // 🔹 Fetch match squads
+    const squadQuery = `
+      SELECT ms.team_id, p.id AS player_id, p.first_name, 
+             p.short_name, p.playing_role, t.name AS team_name
+      FROM match_squads ms
+      JOIN players p ON ms.player_id = p.id
+      JOIN teams t ON ms.team_id = t.id
+      WHERE ms.match_id = ?
+    `;
+    const [squadData] = await db.execute(squadQuery, [internal_match_id]);
+
+    if (squadData.length === 0) {
+      return res.status(404).json({ message: "No players found in squads" });
+    }
+
+    // 🔹 Fetch last match and fantasy points for each player
+    const playerStatsPromises = squadData.map(async (player) => {
+      // Find last match the player played
+      const lastMatchQuery = `
+        SELECT match_id 
+        FROM match_fantasy_points 
+        WHERE player_id = ? 
+        ORDER BY match_id DESC 
+        LIMIT 1
+      `;
+      const [lastMatch] = await db.execute(lastMatchQuery, [player.player_id]);
+
+      if (lastMatch.length === 0) {
+        return null; // No last match found
+      }
+      const lastMatchId = lastMatch[0].match_id;
+
+      // Fetch fantasy points and rating from last match
+      const fantasyPointsQuery = `
+        SELECT point AS total_fantasy_points, rating 
+        FROM match_fantasy_points 
+        WHERE player_id = ? AND match_id = ?
+      `;
+      const [fantasyData] = await db.execute(fantasyPointsQuery, [player.player_id, lastMatchId]);
+
+      if (fantasyData.length === 0) {
+        return null;
+      }
+
+      return {
+        player_id: player.player_id,
+        player_name: player.first_name, // No last_name
+        short_name: player.short_name,
+        playing_role: player.playing_role,
+        team_name: player.team_name,
+        total_fantasy_points: fantasyData[0].total_fantasy_points || 0,
+        rating: Math.min(fantasyData[0].rating || 0, 10) // Rating is capped at 10
+      };
+    });
+
+    // Wait for all player stats to be retrieved
+    const playerStats = (await Promise.all(playerStatsPromises)).filter((p) => p !== null);
+
+    // 🔹 Sort by Total Fantasy Points (Descending), then Rating (Descending)
+    const sortedPlayerStats = playerStats.sort(
+      (a, b) =>
+        b.total_fantasy_points - a.total_fantasy_points || // Sort by fantasy points
+        b.rating - a.rating // If tie, sort by rating
+    );
+
+    // 🔹 Ensure balanced best 11 players
+    let selectedPlayers = [];
+    let ratingBuckets = {
+      "10": [],
+      "9": [],
+      "8": [],
+      "7": [],
+      "6": [],
+      "5": [],
+      "4": [],
+      "3": [],
+      "2": [],
+      "1": [],
+      "0": [],
+    };
+
+    // Distribute players into rating buckets
+    sortedPlayerStats.forEach((player) => {
+      ratingBuckets[player.rating.toFixed(0)].push(player);
+    });
+
+    // Pick best players while maintaining diversity in ratings
+    for (let i = 10; i >= 0; i--) {
+      while (selectedPlayers.length < 11 && ratingBuckets[i].length > 0) {
+        selectedPlayers.push(ratingBuckets[i].shift());
+      }
+    }
+
+    res.json({ match_id, internal_match_id, best_11_players: selectedPlayers });
+  } catch (error) {
+    console.error("❌ Error fetching best 11 players:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
