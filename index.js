@@ -3148,3 +3148,99 @@ app.get("/match/:match_id/best-11-players", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+
+app.get("/api/match/:match_id/best-11-players", async (req, res) => {
+  try {
+    const { match_id } = req.params; // This is the API match ID
+
+    // 🔹 Get Internal Match ID
+    const matchQuery = `SELECT id FROM matches WHERE api_id = ?`;
+    const [matchData] = await db.execute(matchQuery, [match_id]);
+
+    if (matchData.length === 0) {
+      return res.status(404).json({ message: "Match not found" });
+    }
+    const internal_match_id = matchData[0].id;
+
+    // 🔹 Fetch Match Squads
+    const squadQuery = `
+      SELECT ms.team_id, p.id AS player_id, p.first_name, 
+             p.short_name, p.playing_role, t.name AS team_name
+      FROM match_squads ms
+      JOIN players p ON ms.player_id = p.id
+      JOIN teams t ON ms.team_id = t.id
+      WHERE ms.match_id = ?
+    `;
+    const [squadData] = await db.execute(squadQuery, [internal_match_id]);
+
+    if (squadData.length === 0) {
+      return res.status(404).json({ message: "No players found in squads" });
+    }
+
+    // 🔹 Fetch Last 5 Matches & Calculate Fantasy Points for Each Player
+    const playerStatsPromises = squadData.map(async (player) => {
+      const lastMatchesQuery = `
+        SELECT match_id, point AS total_fantasy_points, rating 
+        FROM match_fantasy_points 
+        WHERE player_id = ? 
+        ORDER BY match_id DESC 
+        LIMIT 5
+      `;
+      const [lastMatches] = await db.execute(lastMatchesQuery, [player.player_id]);
+
+      if (lastMatches.length === 0) return null;
+
+      // Calculate total & average fantasy points
+      const totalPoints = lastMatches.reduce((sum, match) => sum + (match.total_fantasy_points || 0), 0);
+      const avgFantasyPoints = (totalPoints / lastMatches.length).toFixed(2);
+      const avgRating = (lastMatches.reduce((sum, match) => sum + (match.rating || 0), 0) / lastMatches.length).toFixed(1);
+
+      return {
+        player_id: player.player_id,
+        player_name: player.first_name, 
+        short_name: player.short_name,
+        playing_role: player.playing_role,
+        team_name: player.team_name,
+        total_fantasy_points: totalPoints,
+        avg_fantasy_points: avgFantasyPoints,
+        rating: Math.min(avgRating, 10) 
+      };
+    });
+
+    const playerStats = (await Promise.all(playerStatsPromises)).filter((p) => p !== null);
+
+    // 🔹 Sort Players by Performance (Fantasy Points & Rating)
+    const sortedPlayerStats = playerStats.sort(
+      (a, b) =>
+        b.avg_fantasy_points - a.avg_fantasy_points ||
+        b.rating - a.rating
+    );
+
+    // 🔹 Ensure Balanced Selection of Best 11 Players
+    let selectedPlayers = [];
+    let roleBuckets = { bat: [], bowl: [], all: [], wk: [] };
+
+    sortedPlayerStats.forEach((player) => {
+      if (roleBuckets[player.playing_role]) {
+        roleBuckets[player.playing_role].push(player);
+      }
+    });
+
+    selectedPlayers.push(...roleBuckets.wk.slice(0, 1));
+    selectedPlayers.push(...roleBuckets.bat.slice(0, 3));
+    selectedPlayers.push(...roleBuckets.all.slice(0, 2));
+    selectedPlayers.push(...roleBuckets.bowl.slice(0, 3));
+
+    const remainingPlayers = sortedPlayerStats.filter((p) => !selectedPlayers.includes(p));
+    while (selectedPlayers.length < 11 && remainingPlayers.length) {
+      selectedPlayers.push(remainingPlayers.shift());
+    }
+
+    res.json({ match_id, internal_match_id, best_11_players: selectedPlayers.slice(0, 11) });
+  } catch (error) {
+    console.error("❌ Error fetching best 11 players:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
