@@ -1340,7 +1340,9 @@ app.get("/stats", async (req, res) => {
     const { match_id, statType } = req.query;
 
     if (!match_id || !statType) {
-      return res.status(400).json({ error: "match_id and statType are required." });
+      return res
+        .status(400)
+        .json({ error: "match_id and statType are required." });
     }
 
     // Convert `api_id` to `internal_match_id`
@@ -1355,13 +1357,17 @@ app.get("/stats", async (req, res) => {
 
     // ✅ Mapping of statType to SQL Fields
     const statFieldMap = {
-      TotalFantasyPoints: "SUM(pfp.point) AS total_fantasy_points",
-      AverageFantasyPoints: "CASE WHEN COUNT(DISTINCT plm.match_id) > 0 THEN SUM(pfp.point) / COUNT(DISTINCT plm.match_id) ELSE 0 END AS avg_fantasy_points",
-      average_rating: "AVG(pfp.rating) AS average_rating",
-      RunsScored: "SUM(bat.runs) AS total_runs",
-      WicketsTaken: "SUM(bowl.wickets) AS total_wickets",
-      DreamTeamAppearances: "COUNT(DISTINCT mdt.match_id) AS dream_team_appearances",
-      StrikeRate: "CASE WHEN SUM(bat.balls_faced) > 0 THEN (SUM(bat.runs) / SUM(bat.balls_faced)) * 100 ELSE 0 END AS strike_rate"
+      TotalFantasyPoints: "COALESCE(SUM(pfp.point), 0) AS total_fantasy_points",
+      AverageFantasyPoints:
+        "COALESCE(SUM(pfp.point) / NULLIF(COUNT(DISTINCT plm.match_id), 0), 0) AS avg_fantasy_points",
+      average_rating: "COALESCE(AVG(pfp.rating), 0) AS average_rating",
+      RunsScored: "COALESCE(SUM(bat.runs), 0) AS total_runs",
+      WicketsTaken: "COALESCE(SUM(bowl.wickets), 0) AS total_wickets",
+      DreamTeamAppearances:
+        "COALESCE(COUNT(DISTINCT mdt.match_id), 0) AS dream_team_appearances",
+      StrikeRate:
+        "CASE WHEN SUM(bat.balls_faced) > 0 THEN " +
+        "COALESCE((SUM(bat.runs) / SUM(bat.balls_faced)) * 100, 0) ELSE 0 END AS strike_rate",
     };
 
     if (!(statType in statFieldMap)) {
@@ -1370,7 +1376,7 @@ app.get("/stats", async (req, res) => {
 
     const statField = statFieldMap[statType];
 
-    // ✅ SQL Query with `AverageFantasyPoints` Calculation
+    // ✅ SQL Query for fetching statistics
     const query = `
       WITH player_squads AS (
           SELECT player_id, team_id
@@ -1407,10 +1413,14 @@ app.get("/stats", async (req, res) => {
           ON ps.team_id = t.id
       LEFT JOIN match_inning_batters bat  
           ON ps.player_id = bat.batsman_id 
-          AND bat.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = plm.match_id)
+          AND bat.match_inning_id IN (
+              SELECT id FROM match_innings WHERE match_id = plm.match_id
+          )
       LEFT JOIN match_inning_bowlers bowl  
           ON ps.player_id = bowl.bowler_id 
-          AND bowl.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = plm.match_id)
+          AND bowl.match_inning_id IN (
+              SELECT id FROM match_innings WHERE match_id = plm.match_id
+          )
       LEFT JOIN match_dream_teams mdt  
           ON ps.player_id = mdt.player_id 
           AND plm.match_id = mdt.match_id
