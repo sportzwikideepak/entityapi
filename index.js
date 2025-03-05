@@ -1343,11 +1343,34 @@ app.get("/stats", async (req, res) => {
       return res.status(400).json({ error: "match_id and statType are required." });
     }
 
-    const statField = getStatField(statType);
-    if (!statField) {
+    // Convert `api_id` to `internal_match_id`
+    const matchQuery = `SELECT id FROM matches WHERE api_id = ?`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+    if (matchResult.length === 0) {
+      return res.status(404).json({ error: "Match not found." });
+    }
+
+    const internal_match_id = matchResult[0].id;
+
+    // ✅ Mapping of statType to SQL Fields
+    const statFieldMap = {
+      TotalFantasyPoints: "SUM(pfp.point) AS total_fantasy_points",
+      AverageFantasyPoints: "CASE WHEN COUNT(DISTINCT plm.match_id) > 0 THEN SUM(pfp.point) / COUNT(DISTINCT plm.match_id) ELSE 0 END AS avg_fantasy_points",
+      average_rating: "AVG(pfp.rating) AS average_rating",
+      RunsScored: "SUM(bat.runs) AS total_runs",
+      WicketsTaken: "SUM(bowl.wickets) AS total_wickets",
+      DreamTeamAppearances: "COUNT(DISTINCT mdt.match_id) AS dream_team_appearances",
+      StrikeRate: "CASE WHEN SUM(bat.balls_faced) > 0 THEN (SUM(bat.runs) / SUM(bat.balls_faced)) * 100 ELSE 0 END AS strike_rate"
+    };
+
+    if (!(statType in statFieldMap)) {
       return res.status(400).json({ error: "Invalid statType provided." });
     }
 
+    const statField = statFieldMap[statType];
+
+    // ✅ SQL Query with `AverageFantasyPoints` Calculation
     const query = `
       WITH player_squads AS (
           SELECT player_id, team_id
@@ -1372,7 +1395,7 @@ app.get("/stats", async (req, res) => {
           COALESCE(pfp.role, 'Unknown') AS role,
           ps.team_id,
           COALESCE(t.name, 'Unknown') AS team_name,
-          COALESCE(COUNT(DISTINCT plm.match_id), 0) AS matches_played,
+          COUNT(DISTINCT plm.match_id) AS matches_played,
           ${statField}
       FROM player_squads ps
       LEFT JOIN player_last_matches plm 
@@ -1395,8 +1418,9 @@ app.get("/stats", async (req, res) => {
       ORDER BY matches_played DESC;
     `;
 
-    const [rows] = await db.execute(query, [match_id]);
-    res.json(rows);
+    const [rows] = await db.execute(query, [internal_match_id]);
+
+    res.json({ match_id, internal_match_id, stats: rows });
   } catch (error) {
     console.error("❌ Error fetching data:", error.message);
     res.status(500).json({ message: "Server error" });
