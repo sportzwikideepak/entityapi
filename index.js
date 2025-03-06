@@ -2096,55 +2096,308 @@ app.get("/venue-pitch-report", async (req, res) => {
 
 
 
+// app.get("/venue-toss-trends", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+
+//     if (!match_id) {
+//       return res.status(400).json({ error: "match_id is required." });
+//     }
+
+//     // ✅ Step 1: Fetch Venue ID & Venue Name from match_id
+//     const venueQuery = `SELECT v.id AS venue_id, v.name AS venue_name 
+//                         FROM matches m 
+//                         JOIN venues v ON m.venue_id = v.id 
+//                         WHERE m.id = ? LIMIT 1;`;
+//     const [venueResult] = await db.execute(venueQuery, [match_id]);
+
+//     if (!venueResult.length || !venueResult[0].venue_id) {
+//       return res
+//         .status(404)
+//         .json({ error: "Match not found or Venue ID is missing." });
+//     }
+
+//     const venue_id = venueResult[0].venue_id;
+//     const venue_name = venueResult[0].venue_name;
+
+//     // ✅ Step 2: Fetch last 10 matches at this venue
+//     const lastMatchesQuery = `
+//         SELECT id, toss, winning_team_id, team_1, team_2
+//         FROM matches 
+//         WHERE venue_id = ? 
+//         ORDER BY date_start DESC 
+//         LIMIT 10;
+//     `;
+//     const [lastMatches] = await db.execute(lastMatchesQuery, [venue_id]);
+
+//     if (!lastMatches.length) {
+//       return res
+//         .status(404)
+//         .json({ error: "No recent matches found at this venue." });
+//     }
+
+//     let totalMatches = lastMatches.length;
+//     let batFirst = 0,
+//       chase = 0;
+//     let winBattingFirst = 0,
+//       winChasing = 0;
+//     let tossWins = 0,
+//       tossLosses = 0;
+
+//     lastMatches.forEach((match) => {
+//       let tossWinnerTeam = match.toss.includes("bat") ? "Bat First" : "Chase";
+//       let didTeamWin = match.winning_team_id ? 1 : 0;
+
+//       if (tossWinnerTeam === "Bat First") {
+//         batFirst++;
+//         if (didTeamWin) winBattingFirst++;
+//       } else if (tossWinnerTeam === "Chase") {
+//         chase++;
+//         if (didTeamWin) winChasing++;
+//       }
+
+//       if (didTeamWin) tossWins++;
+//       else tossLosses++;
+//     });
+
+//     // ✅ Step 3: Handle Edge Cases (Avoid Division by Zero)
+//     let choose_to_bat_first = batFirst
+//       ? ((batFirst / totalMatches) * 100).toFixed(2) + "%"
+//       : "0.00%";
+//     let choose_to_chase = chase
+//       ? ((chase / totalMatches) * 100).toFixed(2) + "%"
+//       : "0.00%";
+
+//     let win_batting_first = batFirst
+//       ? ((winBattingFirst / batFirst) * 100).toFixed(2) + "%"
+//       : "0.00%";
+//     let win_chasing = chase
+//       ? ((winChasing / chase) * 100).toFixed(2) + "%"
+//       : "0.00%";
+
+//     let win_percentage = ((tossWins / totalMatches) * 100).toFixed(2) + "%";
+//     let loss_percentage = ((tossLosses / totalMatches) * 100).toFixed(2) + "%";
+
+//     let tossTrends = {
+//       venue_id,
+//       venue_name, // ✅ Added venue name
+//       matches_analyzed: totalMatches,
+//       toss_decision: {
+//         choose_to_bat_first,
+//         choose_to_chase,
+//       },
+//       win_percentages: {
+//         win_batting_first,
+//         win_chasing,
+//       },
+//       toss_win_record: {
+//         wins_after_winning_toss: `${tossWins}/${totalMatches} matches`,
+//         win_percentage,
+//         loss_percentage,
+//       },
+//     };
+
+//     res.json(tossTrends);
+//   } catch (error) {
+//     console.error("❌ Error fetching venue toss trends:", error.message);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+// app.get("/venue-toss-trends-last-match", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+//     if (!match_id)
+//       return res.status(400).json({ error: "match_id is required." });
+
+//     // Step 1: Fetch Venue ID
+//     const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
+//     const [venueResult] = await db.execute(venueQuery, [match_id]);
+//     if (!venueResult.length)
+//       return res.status(404).json({ error: "Match not found." });
+
+//     const venue_id = venueResult[0].venue_id;
+
+//     // Step 2: Fetch the last completed match at this venue
+//     const lastMatchQuery = `
+//       SELECT id, toss, winning_team_id 
+//       FROM matches 
+//       WHERE venue_id = ? 
+//       AND match_status_id = 2  
+//       ORDER BY date_start DESC 
+//       LIMIT 1;
+//     `;
+//     const [lastMatchResult] = await db.execute(lastMatchQuery, [venue_id]);
+//     if (!lastMatchResult.length)
+//       return res
+//         .status(404)
+//         .json({ error: "No completed match found at this venue." });
+
+//     const lastMatch = lastMatchResult[0];
+
+//     // Step 3: Analyze Toss Trends for Last Match
+//     const tossWinner = lastMatch.toss.includes("bat") ? "Bat First" : "Chase";
+//     const tossWin = lastMatch.winning_team_id ? "Won" : "Lost";
+
+//     res.json({
+//       venue_id,
+//       last_match_id: lastMatch.id,
+//       toss_decision: tossWinner,
+//       toss_win_result: tossWin,
+//     });
+//   } catch (error) {
+//     console.error("❌ Error fetching venue toss trends:", error.message);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+// app.get("/venue-toss-trends-overall", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+//     if (!match_id) {
+//       return res.status(400).json({ error: "match_id is required." });
+//     }
+
+//     // Fetch Venue ID
+//     const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
+//     const [venueResult] = await db.execute(venueQuery, [match_id]);
+//     if (!venueResult.length) {
+//       return res.status(404).json({ error: "Match not found" });
+//     }
+//     const venue_id = venueResult[0].venue_id;
+
+//     // Fetch all completed matches at this venue
+//     const allMatchesQuery = `
+//       SELECT id, toss, winning_team_id, team_1, team_2
+//       FROM matches
+//       WHERE venue_id = ? AND match_status_id = 2
+//       ORDER BY date_start DESC;
+//     `;
+//     const [allMatches] = await db.execute(allMatchesQuery, [venue_id]);
+
+//     if (!allMatches.length) {
+//       return res
+//         .status(404)
+//         .json({ error: "No completed matches found at this venue." });
+//     }
+
+//     let totalMatches = allMatches.length;
+//     let batFirst = 0,
+//       chase = 0;
+//     let winBattingFirst = 0,
+//       winChasing = 0;
+//     let tossWins = 0,
+//       tossLosses = 0;
+
+//     allMatches.forEach((match) => {
+//       let tossWinnerTeam = match.toss.includes("bat") ? "Bat First" : "Chase";
+//       let didTeamWin = match.winning_team_id ? 1 : 0;
+
+//       if (tossWinnerTeam === "Bat First") {
+//         batFirst++;
+//         if (didTeamWin) winBattingFirst++;
+//       } else if (tossWinnerTeam === "Chase") {
+//         chase++;
+//         if (didTeamWin) winChasing++;
+//       }
+
+//       if (didTeamWin) tossWins++;
+//       else tossLosses++;
+//     });
+
+//     // Handle percentages
+//     let choose_to_bat_first = batFirst
+//       ? ((batFirst / totalMatches) * 100).toFixed(2) + "%"
+//       : "0.00%";
+//     let choose_to_chase = chase
+//       ? ((chase / totalMatches) * 100).toFixed(2) + "%"
+//       : "0.00%";
+//     let win_batting_first = batFirst
+//       ? ((winBattingFirst / batFirst) * 100).toFixed(2) + "%"
+//       : "0.00%";
+//     let win_chasing = chase
+//       ? ((winChasing / chase) * 100).toFixed(2) + "%"
+//       : "0.00%";
+
+//     res.json({
+//       venue_id,
+//       matches_analyzed: totalMatches,
+//       toss_decision: { choose_to_bat_first, choose_to_chase },
+//       win_percentages: { win_batting_first, win_chasing },
+//     });
+//   } catch (error) {
+//     console.error(
+//       "❌ Error fetching overall venue toss trends:",
+//       error.message
+//     );
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+
+
+
+
+
+
+
+
 app.get("/venue-toss-trends", async (req, res) => {
   try {
-    const { match_id } = req.query;
+    const { match_id, type } = req.query;
 
     if (!match_id) {
-      return res.status(400).json({ error: "match_id is required." });
+      return res.status(400).json({ error: "match_id (api_id) is required." });
     }
 
-    // ✅ Step 1: Fetch Venue ID & Venue Name from match_id
-    const venueQuery = `SELECT v.id AS venue_id, v.name AS venue_name 
-                        FROM matches m 
-                        JOIN venues v ON m.venue_id = v.id 
-                        WHERE m.id = ? LIMIT 1;`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
+    // ✅ Step 1: Convert `api_id` to actual `id` and fetch venue_id
+    const matchQuery = `SELECT id, venue_id FROM matches WHERE api_id = ? LIMIT 1;`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
 
-    if (!venueResult.length || !venueResult[0].venue_id) {
-      return res
-        .status(404)
-        .json({ error: "Match not found or Venue ID is missing." });
+    if (!matchResult.length || !matchResult[0].venue_id) {
+      return res.status(404).json({ error: "Match not found or Venue ID is missing." });
     }
 
-    const venue_id = venueResult[0].venue_id;
-    const venue_name = venueResult[0].venue_name;
+    const venue_id = matchResult[0].venue_id;
+    let matchLimit = "";
+    let matchCondition = "";
 
-    // ✅ Step 2: Fetch last 10 matches at this venue
-    const lastMatchesQuery = `
-        SELECT id, toss, winning_team_id, team_1, team_2
-        FROM matches 
-        WHERE venue_id = ? 
-        ORDER BY date_start DESC 
-        LIMIT 10;
+    // ✅ Define conditions based on type
+    if (type === "last") {
+      matchLimit = "LIMIT 1";
+      matchCondition = "AND match_status_id = 2"; // ✅ Only completed matches
+    } else if (type === "last5") {
+      matchLimit = "LIMIT 5";
+      matchCondition = "AND match_status_id = 2"; // ✅ Only completed matches
+    } else if (type === "overall") {
+      matchLimit = ""; // ✅ No limit for overall
+      matchCondition = "AND match_status_id = 2"; // ✅ Only completed matches
+    } else {
+      return res.status(400).json({ error: "Invalid type parameter. Use 'last', 'last5', or 'overall'." });
+    }
+
+    // ✅ Fetch Matches Based on Type
+    const matchesQuery = `
+      SELECT id, toss, winning_team_id, team_1, team_2 
+      FROM matches 
+      WHERE venue_id = ? 
+      ${matchCondition}
+      ORDER BY date_start DESC 
+      ${matchLimit};
     `;
-    const [lastMatches] = await db.execute(lastMatchesQuery, [venue_id]);
+    const [matches] = await db.execute(matchesQuery, [venue_id]);
 
-    if (!lastMatches.length) {
-      return res
-        .status(404)
-        .json({ error: "No recent matches found at this venue." });
+    if (!matches.length) {
+      return res.status(404).json({ error: "No completed matches found at this venue." });
     }
 
-    let totalMatches = lastMatches.length;
-    let batFirst = 0,
-      chase = 0;
-    let winBattingFirst = 0,
-      winChasing = 0;
-    let tossWins = 0,
-      tossLosses = 0;
+    // ✅ Process Toss Data
+    let totalMatches = matches.length;
+    let batFirst = 0, chase = 0;
+    let winBattingFirst = 0, winChasing = 0;
+    let tossWins = 0, tossLosses = 0;
 
-    lastMatches.forEach((match) => {
+    matches.forEach((match) => {
       let tossWinnerTeam = match.toss.includes("bat") ? "Bat First" : "Chase";
       let didTeamWin = match.winning_team_id ? 1 : 0;
 
@@ -2160,27 +2413,18 @@ app.get("/venue-toss-trends", async (req, res) => {
       else tossLosses++;
     });
 
-    // ✅ Step 3: Handle Edge Cases (Avoid Division by Zero)
-    let choose_to_bat_first = batFirst
-      ? ((batFirst / totalMatches) * 100).toFixed(2) + "%"
-      : "0.00%";
-    let choose_to_chase = chase
-      ? ((chase / totalMatches) * 100).toFixed(2) + "%"
-      : "0.00%";
+    // ✅ Handle Edge Cases (Prevent Division Errors)
+    let choose_to_bat_first = batFirst ? ((batFirst / totalMatches) * 100).toFixed(2) + "%" : "0.00%";
+    let choose_to_chase = chase ? ((chase / totalMatches) * 100).toFixed(2) + "%" : "0.00%";
 
-    let win_batting_first = batFirst
-      ? ((winBattingFirst / batFirst) * 100).toFixed(2) + "%"
-      : "0.00%";
-    let win_chasing = chase
-      ? ((winChasing / chase) * 100).toFixed(2) + "%"
-      : "0.00%";
+    let win_batting_first = batFirst ? ((winBattingFirst / batFirst) * 100).toFixed(2) + "%" : "0.00%";
+    let win_chasing = chase ? ((winChasing / chase) * 100).toFixed(2) + "%" : "0.00%";
 
     let win_percentage = ((tossWins / totalMatches) * 100).toFixed(2) + "%";
     let loss_percentage = ((tossLosses / totalMatches) * 100).toFixed(2) + "%";
 
     let tossTrends = {
       venue_id,
-      venue_name, // ✅ Added venue name
       matches_analyzed: totalMatches,
       toss_decision: {
         choose_to_bat_first,
@@ -2197,6 +2441,20 @@ app.get("/venue-toss-trends", async (req, res) => {
       },
     };
 
+    // ✅ Return Data for Last Match Separately
+    if (type === "last") {
+      let lastMatch = matches[0];
+      let tossWinner = lastMatch.toss.includes("bat") ? "Bat First" : "Chase";
+      let tossWin = lastMatch.winning_team_id ? "Won" : "Lost";
+
+      return res.json({
+        venue_id,
+        last_match_id: lastMatch.id,
+        toss_decision: tossWinner,
+        toss_win_result: tossWin,
+      });
+    }
+
     res.json(tossTrends);
   } catch (error) {
     console.error("❌ Error fetching venue toss trends:", error.message);
@@ -2204,52 +2462,27 @@ app.get("/venue-toss-trends", async (req, res) => {
   }
 });
 
-app.get("/venue-toss-trends-last-match", async (req, res) => {
-  try {
-    const { match_id } = req.query;
-    if (!match_id)
-      return res.status(400).json({ error: "match_id is required." });
 
-    // Step 1: Fetch Venue ID
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    if (!venueResult.length)
-      return res.status(404).json({ error: "Match not found." });
 
-    const venue_id = venueResult[0].venue_id;
 
-    // Step 2: Fetch the last completed match at this venue
-    const lastMatchQuery = `
-      SELECT id, toss, winning_team_id 
-      FROM matches 
-      WHERE venue_id = ? 
-      AND match_status_id = 2  
-      ORDER BY date_start DESC 
-      LIMIT 1;
-    `;
-    const [lastMatchResult] = await db.execute(lastMatchQuery, [venue_id]);
-    if (!lastMatchResult.length)
-      return res
-        .status(404)
-        .json({ error: "No completed match found at this venue." });
 
-    const lastMatch = lastMatchResult[0];
 
-    // Step 3: Analyze Toss Trends for Last Match
-    const tossWinner = lastMatch.toss.includes("bat") ? "Bat First" : "Chase";
-    const tossWin = lastMatch.winning_team_id ? "Won" : "Lost";
 
-    res.json({
-      venue_id,
-      last_match_id: lastMatch.id,
-      toss_decision: tossWinner,
-      toss_win_result: tossWin,
-    });
-  } catch (error) {
-    console.error("❌ Error fetching venue toss trends:", error.message);
-    res.status(500).json({ message: "Server error" });
-  }
-});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 app.get("/top-players-at-venue", async (req, res) => {
   try {
@@ -2446,88 +2679,7 @@ app.get("/top-players-at-venue-last-match", async (req, res) => {
 
 
 
-app.get("/venue-toss-trends-overall", async (req, res) => {
-  try {
-    const { match_id } = req.query;
-    if (!match_id) {
-      return res.status(400).json({ error: "match_id is required." });
-    }
 
-    // Fetch Venue ID
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    if (!venueResult.length) {
-      return res.status(404).json({ error: "Match not found" });
-    }
-    const venue_id = venueResult[0].venue_id;
-
-    // Fetch all completed matches at this venue
-    const allMatchesQuery = `
-      SELECT id, toss, winning_team_id, team_1, team_2
-      FROM matches
-      WHERE venue_id = ? AND match_status_id = 2
-      ORDER BY date_start DESC;
-    `;
-    const [allMatches] = await db.execute(allMatchesQuery, [venue_id]);
-
-    if (!allMatches.length) {
-      return res
-        .status(404)
-        .json({ error: "No completed matches found at this venue." });
-    }
-
-    let totalMatches = allMatches.length;
-    let batFirst = 0,
-      chase = 0;
-    let winBattingFirst = 0,
-      winChasing = 0;
-    let tossWins = 0,
-      tossLosses = 0;
-
-    allMatches.forEach((match) => {
-      let tossWinnerTeam = match.toss.includes("bat") ? "Bat First" : "Chase";
-      let didTeamWin = match.winning_team_id ? 1 : 0;
-
-      if (tossWinnerTeam === "Bat First") {
-        batFirst++;
-        if (didTeamWin) winBattingFirst++;
-      } else if (tossWinnerTeam === "Chase") {
-        chase++;
-        if (didTeamWin) winChasing++;
-      }
-
-      if (didTeamWin) tossWins++;
-      else tossLosses++;
-    });
-
-    // Handle percentages
-    let choose_to_bat_first = batFirst
-      ? ((batFirst / totalMatches) * 100).toFixed(2) + "%"
-      : "0.00%";
-    let choose_to_chase = chase
-      ? ((chase / totalMatches) * 100).toFixed(2) + "%"
-      : "0.00%";
-    let win_batting_first = batFirst
-      ? ((winBattingFirst / batFirst) * 100).toFixed(2) + "%"
-      : "0.00%";
-    let win_chasing = chase
-      ? ((winChasing / chase) * 100).toFixed(2) + "%"
-      : "0.00%";
-
-    res.json({
-      venue_id,
-      matches_analyzed: totalMatches,
-      toss_decision: { choose_to_bat_first, choose_to_chase },
-      win_percentages: { win_batting_first, win_chasing },
-    });
-  } catch (error) {
-    console.error(
-      "❌ Error fetching overall venue toss trends:",
-      error.message
-    );
-    res.status(500).json({ message: "Server error" });
-  }
-});
 
 app.get("/top-players-at-venue-overall", async (req, res) => {
   try {
