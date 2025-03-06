@@ -1449,6 +1449,16 @@ app.get("/player-fantasy-stats", async (req, res) => {
       return res.status(400).json({ error: "match_id is required." });
     }
 
+    // Convert `api_id` to `match_id`
+    const matchQuery = `SELECT id FROM matches WHERE api_id = ?`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+    if (matchResult.length === 0) {
+      return res.status(404).json({ error: "Match not found." });
+    }
+
+    const internal_match_id = matchResult[0].id; // ✅ Converted match_id
+
     const query = `
       WITH player_squads AS (
           -- ✅ Get all players in the squad for the given match_id
@@ -1544,13 +1554,18 @@ app.get("/player-fantasy-stats", async (req, res) => {
       ORDER BY total_points_last_5 DESC;  -- ✅ Sort by top players in last 5 matches
     `;
 
-    const [rows] = await db.execute(query, [match_id]);
-    res.json(rows);
+    const [rows] = await db.execute(query, [internal_match_id]);
+    res.json({
+      match_id,
+      internal_match_id,
+      stats: rows,
+    });
   } catch (error) {
     console.error("❌ Error fetching data:", error.message);
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 // --------------------------------------VENUE AND PITCH REPORT ------------------------------
 
