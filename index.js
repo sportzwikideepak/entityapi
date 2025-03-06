@@ -1569,47 +1569,479 @@ app.get("/player-fantasy-stats", async (req, res) => {
 
 // --------------------------------------VENUE AND PITCH REPORT ------------------------------
 
+// app.get("/venue-pitch-report", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+
+//     if (!match_id) {
+//       return res.status(400).json({ error: "match_id is required." });
+//     }
+
+//     // ✅ Step 1: Fetch Venue ID from match_id
+//     const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
+//     const [venueResult] = await db.execute(venueQuery, [match_id]);
+
+//     if (!venueResult.length || !venueResult[0].venue_id) {
+//       return res
+//         .status(404)
+//         .json({ error: "Match not found or Venue ID is missing." });
+//     }
+
+//     const venue_id = venueResult[0].venue_id;
+
+//     // ✅ Step 2: Fetch last 5 matches at this venue
+//     const lastMatchesQuery = `
+//         SELECT id FROM matches 
+//         WHERE venue_id = ? 
+//         ORDER BY date_start DESC 
+//         LIMIT 5;
+//     `;
+//     const [lastMatches] = await db.execute(lastMatchesQuery, [venue_id]);
+
+//     if (!lastMatches.length) {
+//       return res
+//         .status(404)
+//         .json({ error: "No recent matches found at this venue." });
+//     }
+
+//     const matchIds = lastMatches.map((m) => m.id);
+
+//     // ✅ Step 3: Fetch venue stats for last 5 matches
+//     const query = `
+//       WITH first_innings_scores AS (
+//           SELECT match_id, AVG(score_runs) AS avg_first_inning_score
+//           FROM match_innings
+//           WHERE match_id IN (${matchIds.map(() => "?").join(",")}) 
+//           AND number = 1
+//           GROUP BY match_id
+//       ),
+
+//       wickets_per_inning AS (
+//           SELECT mi.match_id, COUNT(f.batsman_id) AS avg_wickets_lost
+//           FROM match_innings mi
+//           LEFT JOIN match_inning_fows f ON mi.id = f.match_inning_id
+//           WHERE mi.match_id IN (${matchIds.map(() => "?").join(",")})
+//           GROUP BY mi.match_id
+//       ),
+
+//       player_roles AS (
+//           SELECT ms.match_id,
+//                  SUM(CASE WHEN p.playing_role = 'batsman' THEN 1 ELSE 0 END) AS batsmen_count,
+//                  SUM(CASE WHEN p.playing_role = 'bowler' THEN 1 ELSE 0 END) AS bowlers_count
+//           FROM match_squads ms
+//           JOIN players p ON ms.player_id = p.id
+//           WHERE ms.match_id IN (${matchIds.map(() => "?").join(",")})
+//           AND ms.playing11 = 'true'
+//           GROUP BY ms.match_id
+//       )
+
+//       SELECT 
+//           v.id AS venue_id,
+//           v.name AS venue_name,
+//           COALESCE(AVG(fis.avg_first_inning_score), 0) AS avg_first_inning_score,
+//           COALESCE(AVG(wpi.avg_wickets_lost), 0) AS avg_wickets_lost,
+
+//           CASE 
+//               WHEN AVG(pr.batsmen_count) > AVG(pr.bowlers_count) THEN 'Better for Batsmen'
+//               WHEN AVG(pr.batsmen_count) < AVG(pr.bowlers_count) THEN 'Better for Bowlers'
+//               ELSE 'Balanced for Both'
+//           END AS pitch_report
+
+//       FROM venues v
+//       LEFT JOIN first_innings_scores fis ON 1=1
+//       LEFT JOIN wickets_per_inning wpi ON 1=1
+//       LEFT JOIN player_roles pr ON 1=1
+//       WHERE v.id = ?
+//       GROUP BY v.id, v.name;
+//     `;
+
+//     // ✅ Pass matchIds + venue_id as parameters
+//     const params = [...matchIds, ...matchIds, ...matchIds, venue_id];
+//     const [rows] = await db.execute(query, params);
+
+//     if (!rows.length) {
+//       return res
+//         .status(404)
+//         .json({ error: "No data available for this venue." });
+//     }
+
+//     res.json(rows[0]); // ✅ Return venue pitch report
+//   } catch (error) {
+//     console.error("❌ Error fetching venue pitch report:", error.message);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+// app.get("/venue-pitch-report-last-match", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+//     if (!match_id)
+//       return res.status(400).json({ error: "match_id is required." });
+
+//     // Step 1: Fetch Venue ID
+//     const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
+//     const [venueResult] = await db.execute(venueQuery, [match_id]);
+//     if (!venueResult.length)
+//       return res.status(404).json({ error: "Match not found." });
+
+//     const venue_id = venueResult[0].venue_id;
+
+//     // Step 2: Fetch the last completed match at this venue
+//     const lastMatchQuery = `
+//       SELECT id FROM matches 
+//       WHERE venue_id = ? 
+//       AND match_status_id = 2  -- ✅ Only select completed matches
+//       ORDER BY date_start DESC 
+//       LIMIT 1;  -- ✅ Only fetch the last match
+//     `;
+//     const [lastMatchResult] = await db.execute(lastMatchQuery, [venue_id]);
+//     if (!lastMatchResult.length)
+//       return res
+//         .status(404)
+//         .json({ error: "No completed match found at this venue." });
+
+//     const lastMatchId = lastMatchResult[0].id;
+
+//     // Step 3: Fetch venue stats for the last match
+//     const query = `
+//       SELECT 
+//           v.id AS venue_id,
+//           v.name AS venue_name,
+//           mi.score_runs AS first_inning_score,
+//           COUNT(f.batsman_id) AS wickets_lost
+//       FROM venues v
+//       JOIN match_innings mi ON mi.match_id = ?
+//       LEFT JOIN match_inning_fows f ON mi.id = f.match_inning_id
+//       WHERE v.id = ?
+//       GROUP BY v.id, v.name, mi.score_runs;
+//     `;
+
+//     const [rows] = await db.execute(query, [lastMatchId, venue_id]);
+
+//     if (!rows.length)
+//       return res
+//         .status(404)
+//         .json({ error: "No data available for this venue." });
+
+//     res.json(rows[0]);
+//   } catch (error) {
+//     console.error("❌ Error fetching venue pitch report:", error.message);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+// app.get("/venue-pitch-report-overall", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+//     if (!match_id) {
+//       return res.status(400).json({ error: "match_id is required." });
+//     }
+
+//     // Fetch Venue ID
+//     const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
+//     const [venueResult] = await db.execute(venueQuery, [match_id]);
+//     if (!venueResult.length) {
+//       return res.status(404).json({ error: "Match not found" });
+//     }
+//     const venue_id = venueResult[0].venue_id;
+
+//     // Fetch all matches played at this venue
+//     const allMatchesQuery = `SELECT id FROM matches WHERE venue_id = ? AND match_status_id = 2 ORDER BY date_start DESC;`;
+//     const [allMatches] = await db.execute(allMatchesQuery, [venue_id]);
+//     if (!allMatches.length) {
+//       return res
+//         .status(404)
+//         .json({ error: "No completed matches at this venue." });
+//     }
+
+//     const matchIds = allMatches.map((m) => m.id);
+
+//     // Compute pitch report from all matches
+//     const query = `
+//       SELECT 
+//         v.id AS venue_id,
+//         v.name AS venue_name,
+//         COALESCE(AVG(mi.score_runs), 0) AS avg_first_inning_score,
+//         COALESCE(AVG(fow.runs), 0) AS avg_wickets_lost
+//       FROM venues v
+//       JOIN matches m ON v.id = m.venue_id
+//       JOIN match_innings mi ON mi.match_id = m.id AND mi.number = 1
+//       LEFT JOIN match_inning_fows fow ON mi.id = fow.match_inning_id
+//       WHERE v.id = ?
+//       GROUP BY v.id, v.name;
+//     `;
+
+//     const [rows] = await db.execute(query, [venue_id]);
+
+//     if (!rows.length) {
+//       return res
+//         .status(404)
+//         .json({ error: "No overall venue data available." });
+//     }
+
+//     res.json(rows[0]);
+//   } catch (error) {
+//     console.error(
+//       "❌ Error fetching overall venue pitch report:",
+//       error.message
+//     );
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+// app.get("/venue-pitch-report", async (req, res) => {
+//   try {
+//     const { match_id, type } = req.query;
+
+//     if (!match_id) {
+//       return res.status(400).json({ error: "match_id is required." });
+//     }
+
+//     // ✅ Step 1: Convert `match_id` (api_id) to actual `id`
+//     const matchQuery = `SELECT id, venue_id FROM matches WHERE api_id = ? LIMIT 1;`;
+//     const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+//     if (!matchResult.length || !matchResult[0].venue_id) {
+//       return res.status(404).json({ error: "Match not found or Venue ID is missing." });
+//     }
+
+//     const actual_match_id = matchResult[0].id;
+//     const venue_id = matchResult[0].venue_id;
+
+//     let matchIds = [];
+//     let query = "";
+//     let params = [];
+
+//     if (type === "last") {
+//       // ✅ Fetch the last completed match at this venue
+//       const lastMatchQuery = `
+//         SELECT id FROM matches 
+//         WHERE venue_id = ? 
+//         AND match_status_id = 2  
+//         ORDER BY date_start DESC 
+//         LIMIT 1;
+//       `;
+//       const [lastMatchResult] = await db.execute(lastMatchQuery, [venue_id]);
+//       if (!lastMatchResult.length) {
+//         return res.status(404).json({ error: "No completed match found at this venue." });
+//       }
+//       matchIds = [lastMatchResult[0].id];
+
+//       // ✅ Query for last match
+//       query = `
+//         SELECT 
+//             v.id AS venue_id,
+//             v.name AS venue_name,
+//             mi.score_runs AS first_inning_score,
+//             COUNT(f.batsman_id) AS wickets_lost
+//         FROM venues v
+//         JOIN match_innings mi ON mi.match_id = ?
+//         LEFT JOIN match_inning_fows f ON mi.id = f.match_inning_id
+//         WHERE v.id = ?
+//         GROUP BY v.id, v.name, mi.score_runs;
+//       `;
+//       params = [matchIds[0], venue_id];
+
+//     } else if (type === "last5") {
+//       // ✅ Fetch last 5 matches at this venue
+//       const lastMatchesQuery = `
+//         SELECT id FROM matches 
+//         WHERE venue_id = ? 
+//         ORDER BY date_start DESC 
+//         LIMIT 5;
+//       `;
+//       const [lastMatches] = await db.execute(lastMatchesQuery, [venue_id]);
+
+//       if (!lastMatches.length) {
+//         return res.status(404).json({ error: "No recent matches found at this venue." });
+//       }
+
+//       matchIds = lastMatches.map((m) => m.id);
+
+//       // ✅ Fixed Query for last 5 matches Calculation
+//       query = `
+//         WITH first_innings_scores AS (
+//             SELECT match_id, SUM(score_runs) AS total_score
+//             FROM match_innings
+//             WHERE match_id IN (${matchIds.map(() => "?").join(",")}) 
+//             AND number = 1
+//             GROUP BY match_id
+//         ),
+
+//         wickets_per_inning AS (
+//             SELECT mi.match_id, COUNT(f.batsman_id) AS total_wickets
+//             FROM match_innings mi
+//             LEFT JOIN match_inning_fows f ON mi.id = f.match_inning_id
+//             WHERE mi.match_id IN (${matchIds.map(() => "?").join(",")})
+//             GROUP BY mi.match_id
+//         ),
+
+//         player_roles AS (
+//             SELECT ms.match_id,
+//                    SUM(CASE WHEN p.playing_role = 'batsman' THEN 1 ELSE 0 END) AS batsmen_count,
+//                    SUM(CASE WHEN p.playing_role = 'bowler' THEN 1 ELSE 0 END) AS bowlers_count
+//             FROM match_squads ms
+//             JOIN players p ON ms.player_id = p.id
+//             WHERE ms.match_id IN (${matchIds.map(() => "?").join(",")})
+//             AND ms.playing11 = 'true'
+//             GROUP BY ms.match_id
+//         )
+
+//         SELECT 
+//             v.id AS venue_id,
+//             v.name AS venue_name,
+//             COALESCE(SUM(fis.total_score) / COUNT(DISTINCT fis.match_id), 0) AS avg_first_inning_score,
+//             COALESCE(SUM(wpi.total_wickets) / COUNT(DISTINCT wpi.match_id), 0) AS avg_wickets_lost,
+
+//             CASE 
+//                 WHEN SUM(pr.batsmen_count) > SUM(pr.bowlers_count) THEN 'Better for Batsmen'
+//                 WHEN SUM(pr.batsmen_count) < SUM(pr.bowlers_count) THEN 'Better for Bowlers'
+//                 ELSE 'Balanced for Both'
+//             END AS pitch_report
+
+//         FROM venues v
+//         LEFT JOIN first_innings_scores fis ON 1=1
+//         LEFT JOIN wickets_per_inning wpi ON 1=1
+//         LEFT JOIN player_roles pr ON 1=1
+//         WHERE v.id = ?
+//         GROUP BY v.id, v.name;
+//       `;
+
+//       params = [...matchIds, ...matchIds, ...matchIds, venue_id];
+
+//     } else if (type === "overall") {
+//       // ✅ Fetch all completed matches at this venue
+//       const allMatchesQuery = `SELECT id FROM matches WHERE venue_id = ? AND match_status_id = 2 ORDER BY date_start DESC;`;
+//       const [allMatches] = await db.execute(allMatchesQuery, [venue_id]);
+//       if (!allMatches.length) {
+//         return res.status(404).json({ error: "No completed matches at this venue." });
+//       }
+//       matchIds = allMatches.map((m) => m.id);
+
+//       // ✅ Query for overall venue pitch report
+//       query = `
+//         SELECT 
+//           v.id AS venue_id,
+//           v.name AS venue_name,
+//           COALESCE(SUM(mi.score_runs) / COUNT(DISTINCT mi.match_id), 0) AS avg_first_inning_score,
+//           COALESCE(SUM(fow.runs) / COUNT(DISTINCT fow.match_inning_id), 0) AS avg_wickets_lost
+//         FROM venues v
+//         JOIN matches m ON v.id = m.venue_id
+//         JOIN match_innings mi ON mi.match_id = m.id AND mi.number = 1
+//         LEFT JOIN match_inning_fows fow ON mi.id = fow.match_inning_id
+//         WHERE v.id = ?
+//         GROUP BY v.id, v.name;
+//       `;
+
+//       params = [venue_id];
+
+//     } else {
+//       return res.status(400).json({ error: "Invalid type parameter. Use 'last', 'last5', or 'overall'." });
+//     }
+
+//     const [rows] = await db.execute(query, params);
+
+//     if (!rows.length) {
+//       return res.status(404).json({ error: "No data available for this venue." });
+//     }
+
+//     res.json(rows[0]);
+
+//   } catch (error) {
+//     console.error("❌ Error fetching venue pitch report:", error.message);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+
 app.get("/venue-pitch-report", async (req, res) => {
   try {
-    const { match_id } = req.query;
+    const { match_id, type } = req.query;
 
     if (!match_id) {
-      return res.status(400).json({ error: "match_id is required." });
+      return res.status(400).json({ error: "match_id (api_id) is required." });
     }
 
-    // ✅ Step 1: Fetch Venue ID from match_id
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
+    // ✅ Step 1: Convert `match_id` (api_id) to actual `id` and fetch venue_id
+    const matchQuery = `SELECT id, venue_id FROM matches WHERE api_id = ? LIMIT 1;`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
 
-    if (!venueResult.length || !venueResult[0].venue_id) {
-      return res
-        .status(404)
-        .json({ error: "Match not found or Venue ID is missing." });
+    if (!matchResult.length || !matchResult[0].venue_id) {
+      return res.status(404).json({ error: "Match not found or Venue ID is missing." });
     }
 
-    const venue_id = venueResult[0].venue_id;
+    const venue_id = matchResult[0].venue_id;
+    let matchIds = [];
+    let query = "";
+    let params = [];
 
-    // ✅ Step 2: Fetch last 5 matches at this venue
-    const lastMatchesQuery = `
-        SELECT id FROM matches 
-        WHERE venue_id = ? 
-        ORDER BY date_start DESC 
+    if (type === "last") {
+      // ✅ Fetch the most recent completed match with first innings
+      const lastMatchQuery = `
+        SELECT DISTINCT m.id 
+        FROM matches m
+        JOIN match_innings mi ON m.id = mi.match_id
+        WHERE m.venue_id = ? 
+        AND m.match_status_id = 2  -- ✅ Only completed matches
+        AND mi.number = 1           -- ✅ Only matches where first innings exists
+        ORDER BY m.date_start DESC 
+        LIMIT 1;
+      `;
+      const [lastMatch] = await db.execute(lastMatchQuery, [venue_id]);
+
+      if (!lastMatch.length) {
+        return res.status(404).json({ error: "No recent completed match with first innings found at this venue." });
+      }
+
+      matchIds = [lastMatch[0].id];
+
+    } else if (type === "last5") {
+      // ✅ Fetch last 5 completed matches with first innings
+      const lastMatchesQuery = `
+        SELECT DISTINCT m.id 
+        FROM matches m
+        JOIN match_innings mi ON m.id = mi.match_id
+        WHERE m.venue_id = ? 
+        AND m.match_status_id = 2  
+        AND mi.number = 1           
+        ORDER BY m.date_start DESC 
         LIMIT 5;
-    `;
-    const [lastMatches] = await db.execute(lastMatchesQuery, [venue_id]);
+      `;
+      const [lastMatches] = await db.execute(lastMatchesQuery, [venue_id]);
 
-    if (!lastMatches.length) {
-      return res
-        .status(404)
-        .json({ error: "No recent matches found at this venue." });
+      if (!lastMatches.length) {
+        return res.status(404).json({ error: "No recent completed matches with first innings found at this venue." });
+      }
+
+      matchIds = lastMatches.map((m) => m.id);
+
+    } else if (type === "overall") {
+      // ✅ Fetch all completed matches with first innings at the venue
+      const allMatchesQuery = `
+        SELECT DISTINCT m.id 
+        FROM matches m
+        JOIN match_innings mi ON m.id = mi.match_id
+        WHERE m.venue_id = ? 
+        AND m.match_status_id = 2  
+        AND mi.number = 1           
+        ORDER BY m.date_start DESC;
+      `;
+      const [allMatches] = await db.execute(allMatchesQuery, [venue_id]);
+
+      if (!allMatches.length) {
+        return res.status(404).json({ error: "No completed matches with first innings at this venue." });
+      }
+
+      matchIds = allMatches.map((m) => m.id);
+
+    } else {
+      return res.status(400).json({ error: "Invalid type parameter. Use 'last', 'last5', or 'overall'." });
     }
 
-    const matchIds = lastMatches.map((m) => m.id);
-
-    // ✅ Step 3: Fetch venue stats for last 5 matches
-    const query = `
+    // ✅ Fetch First Inning Scores & Wickets
+    query = `
       WITH first_innings_scores AS (
-          SELECT match_id, AVG(score_runs) AS avg_first_inning_score
+          SELECT match_id, SUM(score_runs) AS total_score, COUNT(*) AS match_count
           FROM match_innings
           WHERE match_id IN (${matchIds.map(() => "?").join(",")}) 
           AND number = 1
@@ -1617,118 +2049,52 @@ app.get("/venue-pitch-report", async (req, res) => {
       ),
 
       wickets_per_inning AS (
-          SELECT mi.match_id, COUNT(f.batsman_id) AS avg_wickets_lost
+          SELECT mi.match_id, COUNT(f.batsman_id) AS total_wickets, COUNT(DISTINCT mi.match_id) AS match_count
           FROM match_innings mi
           LEFT JOIN match_inning_fows f ON mi.id = f.match_inning_id
           WHERE mi.match_id IN (${matchIds.map(() => "?").join(",")})
+          AND mi.number = 1
           GROUP BY mi.match_id
-      ),
-
-      player_roles AS (
-          SELECT ms.match_id,
-                 SUM(CASE WHEN p.playing_role = 'batsman' THEN 1 ELSE 0 END) AS batsmen_count,
-                 SUM(CASE WHEN p.playing_role = 'bowler' THEN 1 ELSE 0 END) AS bowlers_count
-          FROM match_squads ms
-          JOIN players p ON ms.player_id = p.id
-          WHERE ms.match_id IN (${matchIds.map(() => "?").join(",")})
-          AND ms.playing11 = 'true'
-          GROUP BY ms.match_id
       )
 
       SELECT 
           v.id AS venue_id,
           v.name AS venue_name,
-          COALESCE(AVG(fis.avg_first_inning_score), 0) AS avg_first_inning_score,
-          COALESCE(AVG(wpi.avg_wickets_lost), 0) AS avg_wickets_lost,
-
-          CASE 
-              WHEN AVG(pr.batsmen_count) > AVG(pr.bowlers_count) THEN 'Better for Batsmen'
-              WHEN AVG(pr.batsmen_count) < AVG(pr.bowlers_count) THEN 'Better for Bowlers'
-              ELSE 'Balanced for Both'
-          END AS pitch_report
+          COALESCE(ROUND(SUM(fis.total_score) / NULLIF(SUM(fis.match_count), 0), 0), 0) AS avg_first_inning_score,
+          COALESCE(ROUND(SUM(wpi.total_wickets) / NULLIF(SUM(wpi.match_count), 0), 0), 0) AS avg_wickets_lost
 
       FROM venues v
       LEFT JOIN first_innings_scores fis ON 1=1
       LEFT JOIN wickets_per_inning wpi ON 1=1
-      LEFT JOIN player_roles pr ON 1=1
       WHERE v.id = ?
       GROUP BY v.id, v.name;
     `;
 
-    // ✅ Pass matchIds + venue_id as parameters
-    const params = [...matchIds, ...matchIds, ...matchIds, venue_id];
+    params = [...matchIds, ...matchIds, venue_id];
+
+    console.log("✅ SQL Query:", query);
+    console.log("✅ SQL Params:", params);
+
     const [rows] = await db.execute(query, params);
 
     if (!rows.length) {
-      return res
-        .status(404)
-        .json({ error: "No data available for this venue." });
+      return res.status(404).json({ error: "No data available for this venue." });
     }
 
-    res.json(rows[0]); // ✅ Return venue pitch report
-  } catch (error) {
-    console.error("❌ Error fetching venue pitch report:", error.message);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-app.get("/venue-pitch-report-last-match", async (req, res) => {
-  try {
-    const { match_id } = req.query;
-    if (!match_id)
-      return res.status(400).json({ error: "match_id is required." });
-
-    // Step 1: Fetch Venue ID
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    if (!venueResult.length)
-      return res.status(404).json({ error: "Match not found." });
-
-    const venue_id = venueResult[0].venue_id;
-
-    // Step 2: Fetch the last completed match at this venue
-    const lastMatchQuery = `
-      SELECT id FROM matches 
-      WHERE venue_id = ? 
-      AND match_status_id = 2  -- ✅ Only select completed matches
-      ORDER BY date_start DESC 
-      LIMIT 1;  -- ✅ Only fetch the last match
-    `;
-    const [lastMatchResult] = await db.execute(lastMatchQuery, [venue_id]);
-    if (!lastMatchResult.length)
-      return res
-        .status(404)
-        .json({ error: "No completed match found at this venue." });
-
-    const lastMatchId = lastMatchResult[0].id;
-
-    // Step 3: Fetch venue stats for the last match
-    const query = `
-      SELECT 
-          v.id AS venue_id,
-          v.name AS venue_name,
-          mi.score_runs AS first_inning_score,
-          COUNT(f.batsman_id) AS wickets_lost
-      FROM venues v
-      JOIN match_innings mi ON mi.match_id = ?
-      LEFT JOIN match_inning_fows f ON mi.id = f.match_inning_id
-      WHERE v.id = ?
-      GROUP BY v.id, v.name, mi.score_runs;
-    `;
-
-    const [rows] = await db.execute(query, [lastMatchId, venue_id]);
-
-    if (!rows.length)
-      return res
-        .status(404)
-        .json({ error: "No data available for this venue." });
-
+    console.log("✅ Query Output:", rows[0]);
     res.json(rows[0]);
+
   } catch (error) {
     console.error("❌ Error fetching venue pitch report:", error.message);
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+
+
+
+
 
 app.get("/venue-toss-trends", async (req, res) => {
   try {
@@ -2078,64 +2444,7 @@ app.get("/top-players-at-venue-last-match", async (req, res) => {
   }
 });
 
-app.get("/venue-pitch-report-overall", async (req, res) => {
-  try {
-    const { match_id } = req.query;
-    if (!match_id) {
-      return res.status(400).json({ error: "match_id is required." });
-    }
 
-    // Fetch Venue ID
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    if (!venueResult.length) {
-      return res.status(404).json({ error: "Match not found" });
-    }
-    const venue_id = venueResult[0].venue_id;
-
-    // Fetch all matches played at this venue
-    const allMatchesQuery = `SELECT id FROM matches WHERE venue_id = ? AND match_status_id = 2 ORDER BY date_start DESC;`;
-    const [allMatches] = await db.execute(allMatchesQuery, [venue_id]);
-    if (!allMatches.length) {
-      return res
-        .status(404)
-        .json({ error: "No completed matches at this venue." });
-    }
-
-    const matchIds = allMatches.map((m) => m.id);
-
-    // Compute pitch report from all matches
-    const query = `
-      SELECT 
-        v.id AS venue_id,
-        v.name AS venue_name,
-        COALESCE(AVG(mi.score_runs), 0) AS avg_first_inning_score,
-        COALESCE(AVG(fow.runs), 0) AS avg_wickets_lost
-      FROM venues v
-      JOIN matches m ON v.id = m.venue_id
-      JOIN match_innings mi ON mi.match_id = m.id AND mi.number = 1
-      LEFT JOIN match_inning_fows fow ON mi.id = fow.match_inning_id
-      WHERE v.id = ?
-      GROUP BY v.id, v.name;
-    `;
-
-    const [rows] = await db.execute(query, [venue_id]);
-
-    if (!rows.length) {
-      return res
-        .status(404)
-        .json({ error: "No overall venue data available." });
-    }
-
-    res.json(rows[0]);
-  } catch (error) {
-    console.error(
-      "❌ Error fetching overall venue pitch report:",
-      error.message
-    );
-    res.status(500).json({ message: "Server error" });
-  }
-});
 
 app.get("/venue-toss-trends-overall", async (req, res) => {
   try {
