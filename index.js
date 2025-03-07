@@ -2482,193 +2482,106 @@ app.get("/venue-toss-trends", async (req, res) => {
 
 
 
-
-
 app.get("/top-players-at-venue", async (req, res) => {
   try {
-    const { match_id } = req.query;
+    const { match_id, type } = req.query;
+
     if (!match_id) {
-      return res.status(400).json({ message: "match_id is required" });
+      return res.status(400).json({ error: "match_id (api_id) is required." });
     }
 
-    // Step 1: Fetch Venue ID
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    if (!venueResult.length) {
-      return res.status(404).json({ message: "Match not found" });
-    }
-    const venue_id = venueResult[0].venue_id;
+    // ✅ Step 1: Convert `api_id` to actual `id` and fetch venue_id
+    const matchQuery = `SELECT id, venue_id FROM matches WHERE api_id = ? LIMIT 1;`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
 
-    // Step 2: Get Player Squads
-    const squadQuery = `SELECT player_id FROM match_squads WHERE match_id = ?;`;
-    const [squadPlayers] = await db.execute(squadQuery, [match_id]);
-    if (!squadPlayers.length) {
-      return res
-        .status(404)
-        .json({ message: "No squad data found for this match" });
+    if (!matchResult.length || !matchResult[0].venue_id) {
+      return res.status(404).json({ error: "Match not found or Venue ID is missing." });
     }
 
-    let playerData = [];
+    const venue_id = matchResult[0].venue_id;
+    let matchCondition = "";
+    let matchLimit = "";
 
-    for (const player of squadPlayers) {
-      const playerId = player.player_id;
-
-      // Step 3: Find Player's Last Matches at This Venue
-      const lastMatchesQuery = `
-        SELECT id AS match_id FROM matches 
-        WHERE venue_id = ? 
-        AND match_status_id = 2 
-        AND id IN (SELECT match_id FROM match_squads WHERE player_id = ?) 
-        ORDER BY date_start DESC 
-        LIMIT 5;
-      `;
-      const [lastMatches] = await db.execute(lastMatchesQuery, [
-        venue_id,
-        playerId,
-      ]);
-
-      if (!lastMatches.length) {
-        playerData.push({
-          player_id: playerId,
-          status: "no previous match played",
-        });
-        continue;
-      }
-
-      let lastMatchWithPoints = null;
-      for (const match of lastMatches) {
-        const checkPointsQuery = `SELECT COUNT(*) AS count FROM match_fantasy_points WHERE match_id = ? AND player_id = ?;`;
-        const [pointsCheck] = await db.execute(checkPointsQuery, [
-          match.match_id,
-          playerId,
-        ]);
-        if (pointsCheck[0].count > 0) {
-          lastMatchWithPoints = match.match_id;
-          break;
-        }
-      }
-
-      if (!lastMatchWithPoints) {
-        playerData.push({
-          player_id: playerId,
-          status: "no previous match with fantasy points",
-        });
-        continue;
-      }
-
-      // Step 4: Fetch Fantasy Points
-      const fantasyPointsQuery = `
-        SELECT player_id, player_name, point AS fantasy_points 
-        FROM match_fantasy_points 
-        WHERE match_id = ? AND player_id = ? 
-        ORDER BY point DESC;
-      `;
-      const [pointsData] = await db.execute(fantasyPointsQuery, [
-        lastMatchWithPoints,
-        playerId,
-      ]);
-
-      if (pointsData.length > 0) {
-        playerData.push({
-          player_id: pointsData[0].player_id,
-          player_name: pointsData[0].player_name,
-          fantasy_points: pointsData[0].fantasy_points,
-        });
-      }
+    // ✅ Define match selection conditions based on type
+    if (type === "last") {
+      matchLimit = "LIMIT 1";
+      matchCondition = "AND match_status_id = 2"; // ✅ Only completed matches
+    } else if (type === "last5") {
+      matchLimit = "LIMIT 5";
+      matchCondition = "AND match_status_id = 2"; // ✅ Only completed matches
+    } else if (type === "overall") {
+      matchLimit = ""; // ✅ No limit for overall
+      matchCondition = "AND match_status_id = 2"; // ✅ Only completed matches
+    } else {
+      return res.status(400).json({ error: "Invalid type parameter. Use 'last', 'last5', or 'overall'." });
     }
 
-    // Sort Players by Fantasy Points in Descending Order
-    playerData = playerData.sort(
-      (a, b) => (b.fantasy_points || 0) - (a.fantasy_points || 0)
-    );
-
-    res.json({
-      venue_id,
-      players: playerData,
-    });
-  } catch (error) {
-    console.error("❌ Error fetching top players at venue:", error.message);
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-app.get("/top-players-at-venue-last-match", async (req, res) => {
-  try {
-    const { match_id } = req.query;
-    if (!match_id)
-      return res.status(400).json({ message: "match_id is required" });
-
-    // Step 1: Fetch Venue ID
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    if (!venueResult.length)
-      return res.status(404).json({ message: "Match not found" });
-
-    const venue_id = venueResult[0].venue_id;
-
-    // Step 2: Get Player Squads
-    const squadQuery = `SELECT player_id FROM match_squads WHERE match_id = ?;`;
-    const [squadPlayers] = await db.execute(squadQuery, [match_id]);
-    if (!squadPlayers.length)
-      return res
-        .status(404)
-        .json({ message: "No squad data found for this match" });
-
-    // Step 3: Fetch the last match at this venue
-    const lastMatchQuery = `
+    // ✅ Fetch Matches Based on Type
+    const matchesQuery = `
       SELECT id FROM matches 
       WHERE venue_id = ? 
-      AND match_status_id = 2  
+      ${matchCondition}
       ORDER BY date_start DESC 
-      LIMIT 1;
+      ${matchLimit};
     `;
-    const [lastMatchResult] = await db.execute(lastMatchQuery, [venue_id]);
-    if (!lastMatchResult.length)
-      return res
-        .status(404)
-        .json({ message: "No completed match found at this venue." });
+    const [matches] = await db.execute(matchesQuery, [venue_id]);
 
-    const lastMatchId = lastMatchResult[0].id;
+    if (!matches.length) {
+      return res.status(404).json({ error: "No completed matches found at this venue." });
+    }
+
+    const matchIds = matches.map((m) => m.id);
+
+    // ✅ Fetch Player Squads
+    const squadQuery = `
+      SELECT DISTINCT player_id FROM match_squads 
+      WHERE match_id IN (${matchIds.map(() => "?").join(",")});
+    `;
+    const [squadPlayers] = await db.execute(squadQuery, matchIds);
+
+    if (!squadPlayers.length) {
+      return res.status(404).json({ error: "No squad data found for these matches." });
+    }
 
     let playerData = [];
 
+    // ✅ Fetch Fantasy Points for Players
     for (const player of squadPlayers) {
       const playerId = player.player_id;
 
-      // Step 4: Fetch Fantasy Points for Last Match
+      // Fetch player's fantasy points from the relevant matches
       const fantasyPointsQuery = `
-        SELECT player_id, player_name, point AS fantasy_points 
+        SELECT player_id, player_name, SUM(point) AS total_fantasy_points
         FROM match_fantasy_points 
-        WHERE match_id = ? AND player_id = ? 
-        ORDER BY point DESC;
+        WHERE match_id IN (${matchIds.map(() => "?").join(",")}) 
+        AND player_id = ?
+        GROUP BY player_id, player_name
+        ORDER BY total_fantasy_points DESC;
       `;
-      const [pointsData] = await db.execute(fantasyPointsQuery, [
-        lastMatchId,
-        playerId,
-      ]);
+      const [pointsData] = await db.execute(fantasyPointsQuery, [...matchIds, playerId]);
 
       if (pointsData.length > 0) {
         playerData.push({
           player_id: pointsData[0].player_id,
           player_name: pointsData[0].player_name,
-          fantasy_points: pointsData[0].fantasy_points,
+          fantasy_points: pointsData[0].total_fantasy_points,
         });
       } else {
         playerData.push({
           player_id: playerId,
-          status: "No fantasy points recorded for last match",
+          status: "No fantasy points recorded",
         });
       }
     }
 
-    // Sort Players by Fantasy Points in Descending Order
+    // ✅ Sort Players by Fantasy Points in Descending Order
     playerData = playerData.sort(
       (a, b) => (b.fantasy_points || 0) - (a.fantasy_points || 0)
     );
 
     res.json({
       venue_id,
-      last_match_id: lastMatchId,
+      matches_analyzed: matchIds.length,
       players: playerData,
     });
   } catch (error) {
@@ -2676,69 +2589,6 @@ app.get("/top-players-at-venue-last-match", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
-
-
-
-
-app.get("/top-players-at-venue-overall", async (req, res) => {
-  try {
-    const { match_id } = req.query;
-    if (!match_id) {
-      return res.status(400).json({ message: "match_id is required" });
-    }
-
-    // Fetch Venue ID
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ? LIMIT 1;`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    if (!venueResult.length) {
-      return res.status(404).json({ message: "Match not found" });
-    }
-    const venue_id = venueResult[0].venue_id;
-
-    // Fetch all matches at the venue
-    const allMatchesQuery = `
-      SELECT id FROM matches
-      WHERE venue_id = ? AND match_status_id = 2
-      ORDER BY date_start DESC;
-    `;
-    const [allMatches] = await db.execute(allMatchesQuery, [venue_id]);
-    if (!allMatches.length) {
-      return res
-        .status(404)
-        .json({ message: "No completed matches at this venue." });
-    }
-
-    const matchIds = allMatches.map((m) => m.id);
-
-    // Fetch top players based on fantasy points
-    const topPlayersQuery = `
-      SELECT 
-        pfp.player_id,
-        pfp.player_name,
-        SUM(pfp.point) AS total_fantasy_points
-      FROM match_fantasy_points pfp
-      WHERE pfp.match_id IN (${matchIds.map(() => "?").join(",")})
-      GROUP BY pfp.player_id, pfp.player_name
-      ORDER BY total_fantasy_points DESC
-      LIMIT 10;
-    `;
-
-    const [topPlayers] = await db.execute(topPlayersQuery, matchIds);
-
-    res.json({ venue_id, players: topPlayers });
-  } catch (error) {
-    console.error(
-      "❌ Error fetching overall top players at venue:",
-      error.message
-    );
-    res.status(500).json({ message: "Server error" });
-  }
-});
-
-
-
-
 
 
 
@@ -2821,7 +2671,17 @@ app.get("/team-vs-team", async (req, res) => {
       return res.status(400).json({ message: "match_id is required" });
     }
 
-    // Step 1: Fetch Team IDs and Names
+    // Step 1: Convert api_id to match_id
+    const matchIdQuery = `SELECT id FROM matches WHERE api_id = ? LIMIT 1;`;
+    const [matchResult] = await db.execute(matchIdQuery, [match_id]);
+
+    if (!matchResult.length) {
+      return res.status(404).json({ message: "Match not found for given api_id" });
+    }
+
+    const converted_match_id = matchResult[0].id;
+
+    // Step 2: Fetch Team IDs and Names
     const teamQuery = `
       SELECT 
         m.team_1, t1.name AS teamA_name,
@@ -2832,10 +2692,10 @@ app.get("/team-vs-team", async (req, res) => {
       WHERE m.id = ? 
       LIMIT 1;
     `;
-    const [teamResult] = await db.execute(teamQuery, [match_id]);
+    const [teamResult] = await db.execute(teamQuery, [converted_match_id]);
 
     if (!teamResult.length) {
-      return res.status(404).json({ message: "Match not found" });
+      return res.status(404).json({ message: "Match details not found" });
     }
 
     const teamA = teamResult[0].team_1;
@@ -2843,7 +2703,7 @@ app.get("/team-vs-team", async (req, res) => {
     const teamA_name = teamResult[0].teamA_name;
     const teamB_name = teamResult[0].teamB_name;
 
-    // Step 2: Fetch Head-to-Head Matches
+    // Step 3: Fetch Head-to-Head Matches
     const matchesQuery = `
       SELECT id, date_start, team_1, team_2, winning_team_id, win_margin
       FROM matches 
@@ -2864,7 +2724,7 @@ app.get("/team-vs-team", async (req, res) => {
         .json({ message: "No previous matches found between these teams" });
     }
 
-    // Step 3: Calculate Win Stats
+    // Step 4: Calculate Win Stats
     let teamA_wins = 0;
     let teamB_wins = 0;
     let no_results = 0;
@@ -2883,7 +2743,7 @@ app.get("/team-vs-team", async (req, res) => {
     const teamA_win_percentage = ((teamA_wins / totalMatches) * 100).toFixed(2);
     const teamB_win_percentage = ((teamB_wins / totalMatches) * 100).toFixed(2);
 
-    // Step 4: Fetch Recent 5 Matches with Scores
+    // Step 5: Fetch Recent 5 Matches with Scores
     const recentMatchesQuery = `
       SELECT id, date_start, team_1, team_2, winning_team_id, win_margin
       FROM matches 
@@ -2945,6 +2805,8 @@ app.get("/team-vs-team", async (req, res) => {
   }
 });
 
+
+
 app.get("/team-vs-team-stats", async (req, res) => {
   try {
     const { match_id } = req.query;
@@ -2953,7 +2815,17 @@ app.get("/team-vs-team-stats", async (req, res) => {
       return res.status(400).json({ message: "match_id is required" });
     }
 
-    // Step 1: Fetch Team IDs and Names
+    // Step 1: Convert api_id to match_id
+    const matchIdQuery = `SELECT id FROM matches WHERE api_id = ? LIMIT 1;`;
+    const [matchResult] = await db.execute(matchIdQuery, [match_id]);
+
+    if (!matchResult.length) {
+      return res.status(404).json({ message: "Match not found for given api_id" });
+    }
+
+    const converted_match_id = matchResult[0].id;
+
+    // Step 2: Fetch Team IDs and Names
     const teamQuery = `
       SELECT 
         m.team_1, t1.name AS teamA_name,
@@ -2964,10 +2836,10 @@ app.get("/team-vs-team-stats", async (req, res) => {
       WHERE m.id = ? 
       LIMIT 1;
     `;
-    const [teamResult] = await db.execute(teamQuery, [match_id]);
+    const [teamResult] = await db.execute(teamQuery, [converted_match_id]);
 
     if (!teamResult.length) {
-      return res.status(404).json({ message: "Match not found" });
+      return res.status(404).json({ message: "Match details not found" });
     }
 
     const teamA = teamResult[0].team_1;
@@ -2975,7 +2847,7 @@ app.get("/team-vs-team-stats", async (req, res) => {
     const teamA_name = teamResult[0].teamA_name;
     const teamB_name = teamResult[0].teamB_name;
 
-    // Step 2: Fetch Head-to-Head Matches
+    // Step 3: Fetch Head-to-Head Matches
     const matchesQuery = `
       SELECT id, date_start, team_1, team_2, winning_team_id, toss
       FROM matches 
@@ -3075,10 +2947,11 @@ app.get("/team-vs-team-stats", async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("❌ Error fetching team vs team data:", error.message);
+    console.error("❌ Error fetching team vs team stats:", error.message);
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 // ---------------------player overview----------------------------------
 
