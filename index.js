@@ -2681,11 +2681,11 @@ app.get("/team-vs-team", async (req, res) => {
 
     const converted_match_id = matchResult[0].id;
 
-    // Step 2: Fetch Team IDs and Names
+    // Step 2: Fetch Team IDs, Names, and Logos
     const teamQuery = `
       SELECT 
-        m.team_1, t1.name AS teamA_name,
-        m.team_2, t2.name AS teamB_name
+        m.team_1, t1.name AS teamA_name, t1.logo AS teamA_logo,
+        m.team_2, t2.name AS teamB_name, t2.logo AS teamB_logo
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
@@ -2702,6 +2702,8 @@ app.get("/team-vs-team", async (req, res) => {
     const teamB = teamResult[0].team_2;
     const teamA_name = teamResult[0].teamA_name;
     const teamB_name = teamResult[0].teamB_name;
+    const teamA_logo = teamResult[0].teamA_logo;
+    const teamB_logo = teamResult[0].teamB_logo;
 
     // Step 3: Fetch Head-to-Head Matches
     const matchesQuery = `
@@ -2765,10 +2767,12 @@ app.get("/team-vs-team", async (req, res) => {
         teamA: {
           id: match.team_1,
           name: match.team_1 === teamA ? teamA_name : teamB_name,
+          logo: match.team_1 === teamA ? teamA_logo : teamB_logo,
         },
         teamB: {
           id: match.team_2,
           name: match.team_2 === teamA ? teamA_name : teamB_name,
+          logo: match.team_2 === teamA ? teamA_logo : teamB_logo,
         },
         result:
           match.winning_team_id === teamA
@@ -2785,12 +2789,14 @@ app.get("/team-vs-team", async (req, res) => {
         teamA: {
           id: teamA,
           name: teamA_name,
+          logo: teamA_logo,
           win_percentage: `${teamA_win_percentage}%`,
           total_wins: teamA_wins,
         },
         teamB: {
           id: teamB,
           name: teamB_name,
+          logo: teamB_logo,
           win_percentage: `${teamB_win_percentage}%`,
           total_wins: teamB_wins,
         },
@@ -2804,6 +2810,7 @@ app.get("/team-vs-team", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 
 
@@ -2955,285 +2962,441 @@ app.get("/team-vs-team-stats", async (req, res) => {
 
 // ---------------------player overview----------------------------------
 
+// app.get("/player-stats", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+//     if (!match_id)
+//       return res.status(400).json({ error: "match_id is required" });
+
+//     // Get venue_id for the given match
+//     const venueQuery = `SELECT venue_id FROM matches WHERE id = ?`;
+//     const [venueResult] = await db.execute(venueQuery, [match_id]);
+//     const venue_id = venueResult[0]?.venue_id;
+//     const squadQuery = `
+//     SELECT ms.player_id, ms.team_id, mpf.player_name, t.name as team_name, mpf.role
+//     FROM match_squads ms
+//     JOIN match_fantasy_points mpf ON ms.player_id = mpf.player_id AND ms.match_id = mpf.match_id
+//     JOIN teams t ON ms.team_id = t.id
+//     WHERE ms.match_id = ?`;
+//     const [squadPlayers] = await db.execute(squadQuery, [match_id]);
+
+//     let playerStats = [];
+
+//     for (const player of squadPlayers) {
+//       const playerId = player.player_id;
+//       const playerTeamId = player.team_id;
+
+//       const overallQuery = `SELECT SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches FROM match_fantasy_points WHERE player_id = ?`;
+//       const [overallPoints] = await db.execute(overallQuery, [playerId]);
+
+//       const venuePointsQuery = `SELECT AVG(point) as avg_points_venue FROM match_fantasy_points WHERE player_id = ? AND match_id IN (SELECT id FROM matches WHERE venue_id = ?)`;
+//       const [venuePoints] = await db.execute(venuePointsQuery, [
+//         playerId,
+//         venue_id,
+//       ]);
+
+//       const oppositionQuery = `
+//       SELECT AVG(point) as avg_points_opposition 
+//       FROM match_fantasy_points 
+//       WHERE player_id = ? 
+//       AND match_id IN (
+//         SELECT id FROM matches 
+//         WHERE id IN (
+//           SELECT match_id FROM match_squads 
+//           WHERE team_id != ? AND match_id IN (
+//             SELECT match_id FROM match_squads WHERE team_id = ?
+//           )
+//         )
+//       )
+//     `;
+
+//       const [oppositionPoints] = await db.execute(oppositionQuery, [
+//         playerId,
+//         playerTeamId,
+//         playerTeamId,
+//       ]);
+
+//       const dreamTeamQuery = `SELECT COUNT(*) as in_dream_team, SUM(is_captain) as captain_count, SUM(is_vice_captain) as vice_captain_count FROM match_dream_teams WHERE player_id = ?`;
+//       const [dreamTeam] = await db.execute(dreamTeamQuery, [playerId]);
+
+//       playerStats.push({
+//         player_id: playerId,
+//         player_name: player.player_name,
+//         team_name: player.team_name,
+//         role: player.role,
+//         total_points: overallPoints[0].total_points || 0,
+//         avg_points: overallPoints[0].avg_points || 0,
+//         total_matches: overallPoints[0].total_matches || 0,
+//         avg_points_venue: venuePoints[0].avg_points_venue || 0,
+//         avg_points_opposition: oppositionPoints[0].avg_points_opposition || 0,
+//         in_dream_team: dreamTeam[0].in_dream_team || 0,
+//         captain_count: dreamTeam[0].captain_count || 0,
+//         vice_captain_count: dreamTeam[0].vice_captain_count || 0,
+//       });
+//     }
+
+//     playerStats.sort((a, b) => b.total_points - a.total_points);
+
+//     playerStats = playerStats.map((player, index) => ({
+//       ...player,
+//       player_rank: index + 1,
+//       bottom_rank: playerStats.length - index,
+//       avg_position_rank: Math.round(
+//         (index + 1 + (playerStats.length - index)) / 2
+//       ),
+//       avg_team_rank: Math.round((index + 1) / 2),
+//     }));
+
+//     res.json(playerStats);
+//   } catch (error) {
+//     console.error("Error fetching player stats:", error.message);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// });
+
+// app.get("/player-stats-last-match", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+//     if (!match_id)
+//       return res.status(400).json({ error: "match_id is required" });
+
+//     const venueQuery = `SELECT venue_id FROM matches WHERE id = ?`;
+//     const [venueResult] = await db.execute(venueQuery, [match_id]);
+//     const venue_id = venueResult[0]?.venue_id;
+
+//     const squadQuery = `
+//     SELECT ms.player_id, ms.team_id, mpf.player_name, t.name as team_name, mpf.role
+//     FROM match_squads ms
+//     JOIN match_fantasy_points mpf ON ms.player_id = mpf.player_id AND ms.match_id = mpf.match_id
+//     JOIN teams t ON ms.team_id = t.id
+//     WHERE ms.match_id = ?`;
+//     const [squadPlayers] = await db.execute(squadQuery, [match_id]);
+
+//     let playerStats = [];
+
+//     for (const player of squadPlayers) {
+//       const playerId = player.player_id;
+//       const playerTeamId = player.team_id;
+
+//       const lastMatchQuery = `
+//         SELECT SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches 
+//         FROM match_fantasy_points 
+//         WHERE player_id = ? AND match_id = ?`;
+//       const [overallPoints] = await db.execute(lastMatchQuery, [
+//         playerId,
+//         match_id,
+//       ]);
+
+//       const venuePointsQuery = `
+//         SELECT AVG(point) as avg_points_venue 
+//         FROM match_fantasy_points 
+//         WHERE player_id = ? AND match_id = ?`;
+//       const [venuePoints] = await db.execute(venuePointsQuery, [
+//         playerId,
+//         match_id,
+//       ]);
+
+//       const oppositionQuery = `
+//         SELECT AVG(point) as avg_points_opposition 
+//         FROM match_fantasy_points 
+//         WHERE player_id = ? AND match_id = ?`;
+//       const [oppositionPoints] = await db.execute(oppositionQuery, [
+//         playerId,
+//         match_id,
+//       ]);
+
+//       const dreamTeamQuery = `
+//         SELECT COUNT(*) as in_dream_team, SUM(is_captain) as captain_count, SUM(is_vice_captain) as vice_captain_count 
+//         FROM match_dream_teams 
+//         WHERE player_id = ? AND match_id = ?`;
+//       const [dreamTeam] = await db.execute(dreamTeamQuery, [
+//         playerId,
+//         match_id,
+//       ]);
+
+//       playerStats.push({
+//         player_id: playerId,
+//         player_name: player.player_name,
+//         team_name: player.team_name,
+//         role: player.role,
+//         total_points: overallPoints[0].total_points || 0,
+//         avg_points: overallPoints[0].avg_points || 0,
+//         total_matches: overallPoints[0].total_matches || 0,
+//         avg_points_venue: venuePoints[0].avg_points_venue || 0,
+//         avg_points_opposition: oppositionPoints[0].avg_points_opposition || 0,
+//         in_dream_team: dreamTeam[0].in_dream_team || 0,
+//         captain_count: dreamTeam[0].captain_count || 0,
+//         vice_captain_count: dreamTeam[0].vice_captain_count || 0,
+//       });
+//     }
+
+//     playerStats.sort((a, b) => b.total_points - a.total_points);
+//     playerStats = playerStats.map((player, index) => ({
+//       ...player,
+//       player_rank: index + 1,
+//       bottom_rank: playerStats.length - index,
+//       avg_position_rank: Math.round(
+//         (index + 1 + (playerStats.length - index)) / 2
+//       ),
+//       avg_team_rank: Math.round((index + 1) / 2),
+//     }));
+
+//     res.json(playerStats);
+//   } catch (error) {
+//     console.error("Error fetching player stats:", error.message);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// });
+
+// app.get("/player-stats-last5", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+//     if (!match_id)
+//       return res.status(400).json({ error: "match_id is required" });
+
+//     const venueQuery = `SELECT venue_id FROM matches WHERE id = ?`;
+//     const [venueResult] = await db.execute(venueQuery, [match_id]);
+//     const venue_id = venueResult[0]?.venue_id;
+
+//     const squadQuery = `
+//     SELECT ms.player_id, ms.team_id, mpf.player_name, t.name as team_name, mpf.role
+//     FROM match_squads ms
+//     JOIN match_fantasy_points mpf ON ms.player_id = mpf.player_id AND ms.match_id = mpf.match_id
+//     JOIN teams t ON ms.team_id = t.id
+//     WHERE ms.match_id = ?`;
+//     const [squadPlayers] = await db.execute(squadQuery, [match_id]);
+
+//     let playerStats = [];
+
+//     for (const player of squadPlayers) {
+//       const playerId = player.player_id;
+//       const playerTeamId = player.team_id;
+
+//       const last5MatchesQuery = `
+//         SELECT SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches 
+//         FROM (
+//           SELECT * FROM match_fantasy_points WHERE player_id = ? ORDER BY match_id DESC LIMIT 5
+//         ) as recent_matches`;
+//       const [overallPoints] = await db.execute(last5MatchesQuery, [playerId]);
+
+//       const venuePointsQuery = `
+//         SELECT AVG(point) as avg_points_venue 
+//         FROM match_fantasy_points 
+//         WHERE player_id = ? 
+//         AND match_id IN (
+//           SELECT id FROM matches WHERE venue_id = ?
+//         ) 
+//         ORDER BY match_id DESC LIMIT 5`;
+//       const [venuePoints] = await db.execute(venuePointsQuery, [
+//         playerId,
+//         venue_id,
+//       ]);
+
+//       const oppositionQuery = `
+//         SELECT AVG(point) as avg_points_opposition 
+//         FROM match_fantasy_points 
+//         WHERE player_id = ? 
+//         AND match_id IN (
+//           SELECT match_id FROM match_squads 
+//           WHERE team_id != ? AND match_id IN (
+//             SELECT match_id FROM match_squads WHERE team_id = ?
+//           )
+//         ) 
+//         ORDER BY match_id DESC LIMIT 5`;
+//       const [oppositionPoints] = await db.execute(oppositionQuery, [
+//         playerId,
+//         playerTeamId,
+//         playerTeamId,
+//       ]);
+
+//       const dreamTeamQuery = `
+//         SELECT COUNT(*) as in_dream_team, SUM(is_captain) as captain_count, SUM(is_vice_captain) as vice_captain_count 
+//         FROM match_dream_teams 
+//         WHERE player_id = ? 
+//         ORDER BY match_id DESC LIMIT 5`;
+//       const [dreamTeam] = await db.execute(dreamTeamQuery, [playerId]);
+
+//       playerStats.push({
+//         player_id: playerId,
+//         player_name: player.player_name,
+//         team_name: player.team_name,
+//         role: player.role,
+//         total_points: overallPoints[0].total_points || 0,
+//         avg_points: overallPoints[0].avg_points || 0,
+//         total_matches: overallPoints[0].total_matches || 0,
+//         avg_points_venue: venuePoints[0].avg_points_venue || 0,
+//         avg_points_opposition: oppositionPoints[0].avg_points_opposition || 0,
+//         in_dream_team: dreamTeam[0].in_dream_team || 0,
+//         captain_count: dreamTeam[0].captain_count || 0,
+//         vice_captain_count: dreamTeam[0].vice_captain_count || 0,
+//       });
+//     }
+
+//     playerStats.sort((a, b) => b.total_points - a.total_points);
+//     playerStats = playerStats.map((player, index) => ({
+//       ...player,
+//       player_rank: index + 1,
+//       bottom_rank: playerStats.length - index,
+//       avg_position_rank: Math.round(
+//         (index + 1 + (playerStats.length - index)) / 2
+//       ),
+//       avg_team_rank: Math.round((index + 1) / 2),
+//     }));
+
+//     res.json(playerStats);
+//   } catch (error) {
+//     console.error("Error fetching player stats:", error.message);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// });
+
+
+
+
+
 app.get("/player-stats", async (req, res) => {
   try {
-    const { match_id } = req.query;
-    if (!match_id)
-      return res.status(400).json({ error: "match_id is required" });
+    const { match_id } = req.query;  
+    if (!match_id) return res.status(400).json({ error: "match_id is required" });
 
-    // Get venue_id for the given match
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ?`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    const venue_id = venueResult[0]?.venue_id;
+    // Step 1: Fetch actual match ID from matches using match_id (which is actually api_id)
+    const matchQuery = `SELECT id, venue_id FROM matches WHERE api_id = ?`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+    if (!matchResult.length) return res.status(404).json({ error: "Match not found" });
+
+    const actual_match_id = matchResult[0].id;
+    const venue_id = matchResult[0].venue_id;
+
+    // Step 2: Fetch squad details
     const squadQuery = `
-    SELECT ms.player_id, ms.team_id, mpf.player_name, t.name as team_name, mpf.role
-    FROM match_squads ms
-    JOIN match_fantasy_points mpf ON ms.player_id = mpf.player_id AND ms.match_id = mpf.match_id
-    JOIN teams t ON ms.team_id = t.id
-    WHERE ms.match_id = ?`;
-    const [squadPlayers] = await db.execute(squadQuery, [match_id]);
-
-    let playerStats = [];
-
-    for (const player of squadPlayers) {
-      const playerId = player.player_id;
-      const playerTeamId = player.team_id;
-
-      const overallQuery = `SELECT SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches FROM match_fantasy_points WHERE player_id = ?`;
-      const [overallPoints] = await db.execute(overallQuery, [playerId]);
-
-      const venuePointsQuery = `SELECT AVG(point) as avg_points_venue FROM match_fantasy_points WHERE player_id = ? AND match_id IN (SELECT id FROM matches WHERE venue_id = ?)`;
-      const [venuePoints] = await db.execute(venuePointsQuery, [
-        playerId,
-        venue_id,
-      ]);
-
-      const oppositionQuery = `
-      SELECT AVG(point) as avg_points_opposition 
-      FROM match_fantasy_points 
-      WHERE player_id = ? 
-      AND match_id IN (
-        SELECT id FROM matches 
-        WHERE id IN (
-          SELECT match_id FROM match_squads 
-          WHERE team_id != ? AND match_id IN (
-            SELECT match_id FROM match_squads WHERE team_id = ?
-          )
-        )
-      )
+      SELECT ms.player_id, ms.team_id, p.first_name, p.last_name, p.playing_role, t.name as team_name
+      FROM match_squads ms
+      JOIN players p ON ms.player_id = p.id
+      JOIN teams t ON ms.team_id = t.id
+      WHERE ms.match_id = ?;
     `;
+    const [squadPlayers] = await db.execute(squadQuery, [actual_match_id]);
 
-      const [oppositionPoints] = await db.execute(oppositionQuery, [
-        playerId,
-        playerTeamId,
-        playerTeamId,
-      ]);
+    if (!squadPlayers.length) return res.status(404).json({ error: "No squad data found" });
 
-      const dreamTeamQuery = `SELECT COUNT(*) as in_dream_team, SUM(is_captain) as captain_count, SUM(is_vice_captain) as vice_captain_count FROM match_dream_teams WHERE player_id = ?`;
-      const [dreamTeam] = await db.execute(dreamTeamQuery, [playerId]);
+    // Step 3: Get player IDs
+    const playerIds = squadPlayers.map(player => player.player_id);
+    const playerIdsList = playerIds.length ? `(${playerIds.join(",")})` : "(NULL)";
 
-      playerStats.push({
-        player_id: playerId,
-        player_name: player.player_name,
-        team_name: player.team_name,
-        role: player.role,
-        total_points: overallPoints[0].total_points || 0,
-        avg_points: overallPoints[0].avg_points || 0,
-        total_matches: overallPoints[0].total_matches || 0,
-        avg_points_venue: venuePoints[0].avg_points_venue || 0,
-        avg_points_opposition: oppositionPoints[0].avg_points_opposition || 0,
-        in_dream_team: dreamTeam[0].in_dream_team || 0,
-        captain_count: dreamTeam[0].captain_count || 0,
-        vice_captain_count: dreamTeam[0].vice_captain_count || 0,
-      });
-    }
+    // Step 4: Fetch last completed match for all players
+    const lastMatchQuery = `
+      SELECT player_id, MAX(match_id) as last_match_id
+      FROM match_fantasy_points 
+      WHERE player_id IN ${playerIdsList} 
+      AND match_id IN (SELECT id FROM matches WHERE match_status_id = 2) 
+      GROUP BY player_id;
+    `;
+    const [lastMatches] = await db.execute(lastMatchQuery);
+    const lastMatchMap = Object.fromEntries(lastMatches.map(m => [m.player_id, m.last_match_id]));
 
-    playerStats.sort((a, b) => b.total_points - a.total_points);
+    // Step 5: Fetch last 5 completed matches for all players
+    const last5MatchesQuery = `
+      SELECT player_id, match_id FROM match_fantasy_points 
+      WHERE player_id IN ${playerIdsList} 
+      AND match_id IN (SELECT id FROM matches WHERE match_status_id = 2) 
+      ORDER BY match_id DESC;
+    `;
+    const [last5Matches] = await db.execute(last5MatchesQuery);
+    const last5MatchMap = {};
+    last5Matches.forEach(({ player_id, match_id }) => {
+      if (!last5MatchMap[player_id]) last5MatchMap[player_id] = [];
+      if (last5MatchMap[player_id].length < 5) last5MatchMap[player_id].push(match_id);
+    });
 
-    playerStats = playerStats.map((player, index) => ({
-      ...player,
-      player_rank: index + 1,
-      bottom_rank: playerStats.length - index,
-      avg_position_rank: Math.round(
-        (index + 1 + (playerStats.length - index)) / 2
-      ),
-      avg_team_rank: Math.round((index + 1) / 2),
-    }));
+    // Step 6: Fetch overall (last 50 matches) for all players
+    const overallMatchesQuery = `
+      SELECT player_id, match_id FROM match_fantasy_points 
+      WHERE player_id IN ${playerIdsList} 
+      AND match_id IN (SELECT id FROM matches WHERE match_status_id = 2) 
+      ORDER BY match_id DESC;
+    `;
+    const [overallMatches] = await db.execute(overallMatchesQuery);
+    const overallMatchMap = {};
+    overallMatches.forEach(({ player_id, match_id }) => {
+      if (!overallMatchMap[player_id]) overallMatchMap[player_id] = [];
+      if (overallMatchMap[player_id].length < 50) overallMatchMap[player_id].push(match_id);
+    });
 
-    res.json(playerStats);
-  } catch (error) {
-    console.error("Error fetching player stats:", error.message);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-app.get("/player-stats-last-match", async (req, res) => {
-  try {
-    const { match_id } = req.query;
-    if (!match_id)
-      return res.status(400).json({ error: "match_id is required" });
-
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ?`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    const venue_id = venueResult[0]?.venue_id;
-
-    const squadQuery = `
-    SELECT ms.player_id, ms.team_id, mpf.player_name, t.name as team_name, mpf.role
-    FROM match_squads ms
-    JOIN match_fantasy_points mpf ON ms.player_id = mpf.player_id AND ms.match_id = mpf.match_id
-    JOIN teams t ON ms.team_id = t.id
-    WHERE ms.match_id = ?`;
-    const [squadPlayers] = await db.execute(squadQuery, [match_id]);
-
-    let playerStats = [];
-
-    for (const player of squadPlayers) {
-      const playerId = player.player_id;
-      const playerTeamId = player.team_id;
-
-      const lastMatchQuery = `
-        SELECT SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches 
+    // Step 7: Fetch all statistics in one query
+    const fetchStats = async (matchIds) => {
+      if (!matchIds.length) return { total_points: 0, avg_points: 0, total_matches: 0 };
+      const query = `
+        SELECT player_id, SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches
         FROM match_fantasy_points 
-        WHERE player_id = ? AND match_id = ?`;
-      const [overallPoints] = await db.execute(lastMatchQuery, [
-        playerId,
-        match_id,
-      ]);
+        WHERE player_id IN ${playerIdsList} 
+        AND match_id IN (${matchIds.join(",")})
+        GROUP BY player_id;
+      `;
+      const [stats] = await db.execute(query);
+      return Object.fromEntries(stats.map(s => [s.player_id, s]));
+    };
 
-      const venuePointsQuery = `
-        SELECT AVG(point) as avg_points_venue 
-        FROM match_fantasy_points 
-        WHERE player_id = ? AND match_id = ?`;
-      const [venuePoints] = await db.execute(venuePointsQuery, [
-        playerId,
-        match_id,
-      ]);
+    // Fetch stats for last match, last 5 matches, and overall matches
+    const lastMatchStats = await fetchStats(Object.values(lastMatchMap));
+    const last5Stats = await fetchStats(Object.values(last5MatchMap).flat());
+    const overallStats = await fetchStats(Object.values(overallMatchMap).flat());
 
-      const oppositionQuery = `
-        SELECT AVG(point) as avg_points_opposition 
-        FROM match_fantasy_points 
-        WHERE player_id = ? AND match_id = ?`;
-      const [oppositionPoints] = await db.execute(oppositionQuery, [
-        playerId,
-        match_id,
-      ]);
+    // Step 8: Fetch venue-based stats
+    const venueStatsQuery = `
+      SELECT player_id, AVG(point) as avg_points_venue 
+      FROM match_fantasy_points 
+      WHERE player_id IN ${playerIdsList} 
+      AND match_id IN (SELECT id FROM matches WHERE venue_id = ?)
+      GROUP BY player_id;
+    `;
+    const [venueStats] = await db.execute(venueStatsQuery, [venue_id]);
+    const venueStatsMap = Object.fromEntries(venueStats.map(v => [v.player_id, v.avg_points_venue]));
 
-      const dreamTeamQuery = `
-        SELECT COUNT(*) as in_dream_team, SUM(is_captain) as captain_count, SUM(is_vice_captain) as vice_captain_count 
-        FROM match_dream_teams 
-        WHERE player_id = ? AND match_id = ?`;
-      const [dreamTeam] = await db.execute(dreamTeamQuery, [
-        playerId,
-        match_id,
-      ]);
-
-      playerStats.push({
-        player_id: playerId,
-        player_name: player.player_name,
-        team_name: player.team_name,
-        role: player.role,
-        total_points: overallPoints[0].total_points || 0,
-        avg_points: overallPoints[0].avg_points || 0,
-        total_matches: overallPoints[0].total_matches || 0,
-        avg_points_venue: venuePoints[0].avg_points_venue || 0,
-        avg_points_opposition: oppositionPoints[0].avg_points_opposition || 0,
-        in_dream_team: dreamTeam[0].in_dream_team || 0,
-        captain_count: dreamTeam[0].captain_count || 0,
-        vice_captain_count: dreamTeam[0].vice_captain_count || 0,
-      });
-    }
-
-    playerStats.sort((a, b) => b.total_points - a.total_points);
-    playerStats = playerStats.map((player, index) => ({
-      ...player,
-      player_rank: index + 1,
-      bottom_rank: playerStats.length - index,
-      avg_position_rank: Math.round(
-        (index + 1 + (playerStats.length - index)) / 2
-      ),
-      avg_team_rank: Math.round((index + 1) / 2),
-    }));
-
-    res.json(playerStats);
-  } catch (error) {
-    console.error("Error fetching player stats:", error.message);
-    res.status(500).json({ error: "Server error" });
-  }
-});
-
-app.get("/player-stats-last5", async (req, res) => {
-  try {
-    const { match_id } = req.query;
-    if (!match_id)
-      return res.status(400).json({ error: "match_id is required" });
-
-    const venueQuery = `SELECT venue_id FROM matches WHERE id = ?`;
-    const [venueResult] = await db.execute(venueQuery, [match_id]);
-    const venue_id = venueResult[0]?.venue_id;
-
-    const squadQuery = `
-    SELECT ms.player_id, ms.team_id, mpf.player_name, t.name as team_name, mpf.role
-    FROM match_squads ms
-    JOIN match_fantasy_points mpf ON ms.player_id = mpf.player_id AND ms.match_id = mpf.match_id
-    JOIN teams t ON ms.team_id = t.id
-    WHERE ms.match_id = ?`;
-    const [squadPlayers] = await db.execute(squadQuery, [match_id]);
-
-    let playerStats = [];
-
-    for (const player of squadPlayers) {
-      const playerId = player.player_id;
-      const playerTeamId = player.team_id;
-
-      const last5MatchesQuery = `
-        SELECT SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches 
-        FROM (
-          SELECT * FROM match_fantasy_points WHERE player_id = ? ORDER BY match_id DESC LIMIT 5
-        ) as recent_matches`;
-      const [overallPoints] = await db.execute(last5MatchesQuery, [playerId]);
-
-      const venuePointsQuery = `
-        SELECT AVG(point) as avg_points_venue 
-        FROM match_fantasy_points 
-        WHERE player_id = ? 
-        AND match_id IN (
-          SELECT id FROM matches WHERE venue_id = ?
-        ) 
-        ORDER BY match_id DESC LIMIT 5`;
-      const [venuePoints] = await db.execute(venuePointsQuery, [
-        playerId,
-        venue_id,
-      ]);
-
-      const oppositionQuery = `
-        SELECT AVG(point) as avg_points_opposition 
-        FROM match_fantasy_points 
-        WHERE player_id = ? 
-        AND match_id IN (
-          SELECT match_id FROM match_squads 
-          WHERE team_id != ? AND match_id IN (
-            SELECT match_id FROM match_squads WHERE team_id = ?
+    // Step 9: Fetch opposition stats
+    const oppositionQuery = `
+      SELECT player_id, AVG(point) as avg_points_opposition 
+      FROM match_fantasy_points 
+      WHERE player_id IN ${playerIdsList}
+      AND match_id IN (
+          SELECT id FROM matches 
+          WHERE id IN (
+              SELECT match_id FROM match_squads 
+              WHERE team_id != (SELECT team_id FROM match_squads WHERE match_id = ? LIMIT 1)
           )
-        ) 
-        ORDER BY match_id DESC LIMIT 5`;
-      const [oppositionPoints] = await db.execute(oppositionQuery, [
-        playerId,
-        playerTeamId,
-        playerTeamId,
-      ]);
+      )
+      GROUP BY player_id;
+    `;
+    const [oppositionStats] = await db.execute(oppositionQuery, [actual_match_id]);
+    const oppositionStatsMap = Object.fromEntries(oppositionStats.map(o => [o.player_id, o.avg_points_opposition]));
 
-      const dreamTeamQuery = `
-        SELECT COUNT(*) as in_dream_team, SUM(is_captain) as captain_count, SUM(is_vice_captain) as vice_captain_count 
-        FROM match_dream_teams 
-        WHERE player_id = ? 
-        ORDER BY match_id DESC LIMIT 5`;
-      const [dreamTeam] = await db.execute(dreamTeamQuery, [playerId]);
+    // Step 10: Fetch dream team stats
+    const dreamTeamQuery = `
+      SELECT player_id, COUNT(*) as in_dream_team, SUM(is_captain) as captain_count, SUM(is_vice_captain) as vice_captain_count
+      FROM match_dream_teams 
+      WHERE player_id IN ${playerIdsList}
+      GROUP BY player_id;
+    `;
+    const [dreamTeamStats] = await db.execute(dreamTeamQuery);
+    const dreamTeamMap = Object.fromEntries(dreamTeamStats.map(d => [d.player_id, d]));
 
-      playerStats.push({
-        player_id: playerId,
-        player_name: player.player_name,
-        team_name: player.team_name,
-        role: player.role,
-        total_points: overallPoints[0].total_points || 0,
-        avg_points: overallPoints[0].avg_points || 0,
-        total_matches: overallPoints[0].total_matches || 0,
-        avg_points_venue: venuePoints[0].avg_points_venue || 0,
-        avg_points_opposition: oppositionPoints[0].avg_points_opposition || 0,
-        in_dream_team: dreamTeam[0].in_dream_team || 0,
-        captain_count: dreamTeam[0].captain_count || 0,
-        vice_captain_count: dreamTeam[0].vice_captain_count || 0,
-      });
-    }
+    // Step 11: Compile response
+    let playerStats = squadPlayers.map(player => ({
+      player_id: player.player_id,
+      player_name: `${player.first_name} ${player.last_name}`,
+      team_name: player.team_name,
+      role: player.playing_role,
 
-    playerStats.sort((a, b) => b.total_points - a.total_points);
-    playerStats = playerStats.map((player, index) => ({
-      ...player,
-      player_rank: index + 1,
-      bottom_rank: playerStats.length - index,
-      avg_position_rank: Math.round(
-        (index + 1 + (playerStats.length - index)) / 2
-      ),
-      avg_team_rank: Math.round((index + 1) / 2),
+      last_match: lastMatchStats[player.player_id] || { total_points: 0, avg_points: 0, total_matches: 0 },
+      last_5_matches: last5Stats[player.player_id] || { total_points: 0, avg_points: 0, total_matches: 0 },
+      overall: overallStats[player.player_id] || { total_points: 0, avg_points: 0, total_matches: 0 },
+
+      avg_points_venue: venueStatsMap[player.player_id] || 0,
+      avg_points_opposition: oppositionStatsMap[player.player_id] || 0,
+
+      in_dream_team: dreamTeamMap[player.player_id]?.in_dream_team || 0,
+      captain_count: dreamTeamMap[player.player_id]?.captain_count || 0,
+      vice_captain_count: dreamTeamMap[player.player_id]?.vice_captain_count || 0,
     }));
 
     res.json(playerStats);
@@ -3242,6 +3405,15 @@ app.get("/player-stats-last5", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
+
+
+
+
+
+
+
+
+
 
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 
