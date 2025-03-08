@@ -3383,7 +3383,7 @@ app.get("/player-stats", async (req, res) => {
     // Step 11: Compile response
     let playerStats = squadPlayers.map(player => ({
       player_id: player.player_id,
-      player_name: `${player.first_name} ${player.last_name}`,
+      player_name: `${player.first_name}`,
       team_name: player.team_name,
       role: player.playing_role,
 
