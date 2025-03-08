@@ -3409,6 +3409,142 @@ app.get("/player-stats", async (req, res) => {
 
 
 
+app.get("/bowler-stats", async (req, res) => {
+  try {
+    const { match_id } = req.query;  
+    if (!match_id) return res.status(400).json({ error: "match_id is required" });
+
+    // Step 1: Fetch actual match ID from matches table
+    const matchQuery = `SELECT id, venue_id FROM matches WHERE api_id = ?`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+    if (!matchResult.length) return res.status(404).json({ error: "Match not found" });
+
+    const actual_match_id = matchResult[0].id;
+    const venue_id = matchResult[0].venue_id;
+
+    // Step 2: Fetch squad details (Only Bowlers)
+    const squadQuery = `
+      SELECT ms.player_id, ms.team_id, p.first_name, p.last_name, p.playing_role, p.bowling_style, t.name as team_name
+      FROM match_squads ms
+      JOIN players p ON ms.player_id = p.id
+      JOIN teams t ON ms.team_id = t.id
+      WHERE ms.match_id = ? AND p.playing_role = 'bowl';
+    `;
+    const [squadPlayers] = await db.execute(squadQuery, [actual_match_id]);
+
+    if (!squadPlayers.length) return res.status(404).json({ error: "No bowler data found" });
+
+    // Step 3: Get player IDs
+    const playerIds = squadPlayers.map(player => player.player_id);
+    const playerIdsList = playerIds.length ? `(${playerIds.join(",")})` : "(NULL)";
+
+    // Step 4: Fetch last completed match for bowlers
+    const lastMatchQuery = `
+      SELECT player_id, MAX(match_id) as last_match_id
+      FROM match_fantasy_points 
+      WHERE player_id IN ${playerIdsList} 
+      AND match_id IN (SELECT id FROM matches WHERE match_status_id = 2) 
+      GROUP BY player_id;
+    `;
+    const [lastMatches] = await db.execute(lastMatchQuery);
+    const lastMatchMap = Object.fromEntries(lastMatches.map(m => [m.player_id, m.last_match_id]));
+
+    // Step 5: Fetch last 5 completed matches for bowlers
+    const last5MatchesQuery = `
+      SELECT player_id, match_id FROM match_fantasy_points 
+      WHERE player_id IN ${playerIdsList} 
+      AND match_id IN (SELECT id FROM matches WHERE match_status_id = 2) 
+      ORDER BY match_id DESC;
+    `;
+    const [last5Matches] = await db.execute(last5MatchesQuery);
+    const last5MatchMap = {};
+    last5Matches.forEach(({ player_id, match_id }) => {
+      if (!last5MatchMap[player_id]) last5MatchMap[player_id] = [];
+      if (last5MatchMap[player_id].length < 5) last5MatchMap[player_id].push(match_id);
+    });
+
+    // Step 6: Fetch overall stats (last 50 matches) for bowlers
+    const overallMatchesQuery = `
+      SELECT player_id, match_id FROM match_fantasy_points 
+      WHERE player_id IN ${playerIdsList} 
+      AND match_id IN (SELECT id FROM matches WHERE match_status_id = 2) 
+      ORDER BY match_id DESC;
+    `;
+    const [overallMatches] = await db.execute(overallMatchesQuery);
+    const overallMatchMap = {};
+    overallMatches.forEach(({ player_id, match_id }) => {
+      if (!overallMatchMap[player_id]) overallMatchMap[player_id] = [];
+      if (overallMatchMap[player_id].length < 50) overallMatchMap[player_id].push(match_id);
+    });
+
+    // Step 7: Fetch all bowling statistics
+    const fetchStats = async (matchIds) => {
+      if (!matchIds.length) return {};
+      const query = `
+        SELECT player_id, SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches
+        FROM match_fantasy_points 
+        WHERE player_id IN ${playerIdsList} 
+        AND match_id IN (${matchIds.join(",")})
+        GROUP BY player_id;
+      `;
+      const [stats] = await db.execute(query);
+      return Object.fromEntries(stats.map(s => [s.player_id, s]));
+    };
+
+    // Fetch stats for last match, last 5 matches, and overall matches
+    const lastMatchStats = await fetchStats(Object.values(lastMatchMap));
+    const last5Stats = await fetchStats(Object.values(last5MatchMap).flat());
+    const overallStats = await fetchStats(Object.values(overallMatchMap).flat());
+
+    // Step 8: Fetch venue-based stats
+    const venueStatsQuery = `
+      SELECT player_id, AVG(point) as avg_points_venue 
+      FROM match_fantasy_points 
+      WHERE player_id IN ${playerIdsList} 
+      AND match_id IN (SELECT id FROM matches WHERE venue_id = ?)
+      GROUP BY player_id;
+    `;
+    const [venueStats] = await db.execute(venueStatsQuery, [venue_id]);
+    const venueStatsMap = Object.fromEntries(venueStats.map(v => [v.player_id, v.avg_points_venue]));
+
+    // Step 9: Fetch bowling stats from match_inning_bowlers table
+    const bowlingStatsQuery = `
+      SELECT bowler_id, AVG(overs) as avg_overs, SUM(wickets) as total_wickets, AVG(econ) as avg_fpts_bowling_1st
+      FROM match_inning_bowlers 
+      WHERE bowler_id IN ${playerIdsList} 
+      GROUP BY bowler_id;
+    `;
+    const [bowlingStats] = await db.execute(bowlingStatsQuery);
+    const bowlingStatsMap = Object.fromEntries(bowlingStats.map(b => [b.bowler_id, b]));
+
+    // Step 10: Compile response
+    let bowlerStats = squadPlayers.map(player => ({
+      player_id: player.player_id,
+      player_name: `${player.first_name}`,
+      team_name: player.team_name,
+      role: player.playing_role,
+      bowling_style: player.bowling_style,
+
+      last_match: lastMatchStats[player.player_id] || { total_points: 0, avg_points: 0, total_matches: 0 },
+      last_5_matches: last5Stats[player.player_id] || { total_points: 0, avg_points: 0, total_matches: 0 },
+      overall: overallStats[player.player_id] || { total_points: 0, avg_points: 0, total_matches: 0 },
+
+      avg_points_venue: venueStatsMap[player.player_id] || 0,
+
+      avg_fpts_bowling_1st: bowlingStatsMap[player.player_id]?.avg_fpts_bowling_1st || 0,
+      total_wickets: bowlingStatsMap[player.player_id]?.total_wickets || 0,
+      total_overs: bowlingStatsMap[player.player_id]?.avg_overs || 0,
+    }));
+
+    res.json(bowlerStats);
+  } catch (error) {
+    console.error("Error fetching bowler stats:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+
 
 
 
