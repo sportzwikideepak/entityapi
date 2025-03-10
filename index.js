@@ -2777,6 +2777,107 @@ app.get('/top-players-venue1', async (req, res) => {
 
 
 
+app.get("/top-players-venue2", async (req, res) => {
+  try {
+    let { match_id } = req.query;
+
+    if (!match_id) {
+      return res.status(400).json({ message: "match_id is required" });
+    }
+
+    // ✅ Convert api_id to match_id if needed
+    const matchQuery = `SELECT id FROM matches WHERE api_id = ? LIMIT 1`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+    if (matchResult.length > 0) {
+      match_id = matchResult[0].id;
+    }
+
+    // ✅ Fetch top players at the venue using match_id
+    const query = `
+      WITH venue_info AS (
+          -- ✅ Get venue_id for the given match_id
+          SELECT venue_id FROM matches WHERE id = ?
+      ),
+
+      player_squads AS (
+          -- ✅ Get all players in the squad for the given match_id
+          SELECT player_id, team_id FROM match_squads WHERE match_id = ?
+      ),
+
+      player_venue_matches AS (
+          -- ✅ Fetch last matches played at this venue
+          SELECT 
+              pfp.player_id,
+              pfp.player_name,
+              pfp.match_id,
+              ps.team_id,
+              pfp.point AS fantasy_points
+          FROM match_fantasy_points pfp
+          JOIN matches m ON pfp.match_id = m.id
+          JOIN player_squads ps ON pfp.player_id = ps.player_id
+          WHERE m.venue_id = (SELECT venue_id FROM venue_info)
+          ORDER BY m.date_start DESC
+      ),
+
+      player_total_points AS (
+          -- ✅ Aggregate total points and count matches played at this venue
+          SELECT 
+              pfp.player_id,
+              pfp.player_name,
+              pfp.team_id,
+              t.name AS team_name,
+              SUM(pfp.fantasy_points) AS total_points,
+              COUNT(DISTINCT pfp.match_id) AS matches_played  -- ✅ Count distinct matches
+          FROM player_venue_matches pfp
+          JOIN teams t ON pfp.team_id = t.id
+          GROUP BY pfp.player_id, pfp.player_name, pfp.team_id, t.name
+      )
+
+      -- ✅ Fetch top 5 players with highest fantasy points at this venue
+      SELECT 
+          ptp.player_id,
+          ptp.player_name,
+          ptp.team_id,
+          ptp.team_name,
+          ptp.total_points,
+          ptp.matches_played  -- ✅ Return total matches played
+      FROM player_total_points ptp
+      ORDER BY total_points DESC
+      LIMIT 5;
+    `;
+
+    const [results] = await db.execute(query, [match_id, match_id]);
+
+    if (results.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "No top player data found for this venue" });
+    }
+
+    res.json({
+      match_id: match_id,
+      top_players: results.map((player) => ({
+        player_id: player.player_id,
+        player_name: player.player_name,
+        team_id: player.team_id,
+        team_name: player.team_name,
+        total_points: player.total_points,
+        matches_played: player.matches_played,  // ✅ Added total matches played
+      })),
+    });
+  } catch (error) {
+    console.error(
+      "❌ Error fetching top players at this venue:",
+      error.message
+    );
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+
+
 
 
 
