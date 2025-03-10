@@ -2885,6 +2885,154 @@ app.get("/top-players-venue2", async (req, res) => {
 
 
 
+app.get("/match-insights", async (req, res) => {
+  try {
+    const { match_id } = req.query;
+
+    if (!match_id) {
+      return res.status(400).json({ error: "match_id is required" });
+    }
+
+    // ✅ Step 1: Convert API ID to Match ID
+    const matchQuery = `SELECT id, venue_id FROM matches WHERE api_id = ? LIMIT 1`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+    if (matchResult.length === 0) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+
+    const internal_match_id = matchResult[0].id;
+    const venue_id = matchResult[0].venue_id;
+
+    // ✅ Step 2: Fetch Squads for this Match
+    const squadQuery = `
+      SELECT ps.player_id, ps.team_id, t.name AS team_name, p.first_name, p.last_name, p.playing_role
+      FROM match_squads ps
+      JOIN teams t ON ps.team_id = t.id
+      JOIN players p ON ps.player_id = p.id
+      WHERE ps.match_id = ?
+    `;
+    const [squads] = await db.execute(squadQuery, [internal_match_id]);
+
+    if (!squads.length) {
+      return res.status(404).json({ error: "No squads found for this match" });
+    }
+
+    // ✅ Step 3: Fetch Fantasy Points and Matches Played
+    const playerStatsQuery = `
+      SELECT pfp.player_id, COUNT(DISTINCT pfp.match_id) AS matches_played, SUM(pfp.point) AS total_fantasy_points
+      FROM match_fantasy_points pfp
+      WHERE pfp.player_id IN (SELECT player_id FROM match_squads WHERE match_id = ?)
+      GROUP BY pfp.player_id
+    `;
+    const [playerStats] = await db.execute(playerStatsQuery, [internal_match_id]);
+
+    // ✅ Step 4: Fetch Batting Order (Sort by most innings played)
+    const battingOrderQuery = `
+      SELECT bat.batsman_id AS player_id, COUNT(bat.match_inning_id) AS innings_played
+      FROM match_inning_batters bat
+      WHERE bat.match_inning_id IN (SELECT id FROM match_innings WHERE match_id = ?)
+      GROUP BY bat.batsman_id
+      ORDER BY innings_played DESC
+    `;
+    const [battingOrderData] = await db.execute(battingOrderQuery, [internal_match_id]);
+
+    // ✅ Step 5: Fetch Top Batters (Role: 'bat')
+    const topBattingQuery = `
+      SELECT pfp.player_id, SUM(pfp.run) AS total_runs
+      FROM match_fantasy_points pfp
+      WHERE pfp.player_id IN (SELECT player_id FROM match_squads WHERE match_id = ?)
+      GROUP BY pfp.player_id
+      ORDER BY total_runs DESC
+      LIMIT 5;
+    `;
+    const [topBatters] = await db.execute(topBattingQuery, [internal_match_id]);
+
+    // ✅ Step 6: Fetch Top Bowlers (Role: 'bowl')
+    const topBowlingQuery = `
+      SELECT pfp.player_id, SUM(pfp.wkts) AS total_wickets
+      FROM match_fantasy_points pfp
+      WHERE pfp.player_id IN (SELECT player_id FROM match_squads WHERE match_id = ?)
+      GROUP BY pfp.player_id
+      ORDER BY total_wickets DESC
+      LIMIT 5;
+    `;
+    const [topBowlers] = await db.execute(topBowlingQuery, [internal_match_id]);
+
+    // ✅ Step 7: Fetch Player X-Factor (All-rounders who played well in last match)
+    const xFactorQuery = `
+      SELECT pfp.player_id, SUM(pfp.run + pfp.wkts * 20) AS x_factor_points
+      FROM match_fantasy_points pfp
+      WHERE pfp.player_id IN (SELECT player_id FROM match_squads WHERE match_id = ?)
+      GROUP BY pfp.player_id
+      ORDER BY x_factor_points DESC
+      LIMIT 5;
+    `;
+    const [xFactorPlayers] = await db.execute(xFactorQuery, [internal_match_id]);
+
+    // ✅ Data Processing
+    const playersMap = Object.fromEntries(
+      squads.map((p) => [p.player_id, { ...p, matches_played: 0, total_fantasy_points: 0 }])
+    );
+
+    playerStats.forEach((stat) => {
+      if (playersMap[stat.player_id]) {
+        playersMap[stat.player_id].matches_played = stat.matches_played;
+        playersMap[stat.player_id].total_fantasy_points = stat.total_fantasy_points;
+      }
+    });
+
+    // ✅ Construct Response
+    res.json({
+      match_id,
+      venue_id,
+      suggested_players: Object.values(playersMap)
+        .sort((a, b) => b.total_fantasy_points - a.total_fantasy_points)
+        .slice(0, 5)
+        .map((player) => ({
+          player_id: player.player_id,
+          player_name: `${player.first_name}`,
+          team_id: player.team_id,
+          team_name: player.team_name,
+          matches_played: player.matches_played,
+          total_fantasy_points: player.total_fantasy_points,
+        })),
+      top_batting: topBatters.map((player) => ({
+        player_id: player.player_id,
+        player_name: `${playersMap[player.player_id]?.first_name || ""}`,
+        team_id: playersMap[player.player_id]?.team_id || null,
+        team_name: playersMap[player.player_id]?.team_name || null,
+        total_runs: player.total_runs,
+      })),
+      top_bowling: topBowlers.map((player) => ({
+        player_id: player.player_id,
+        player_name: `${playersMap[player.player_id]?.first_name || ""}`,
+        team_id: playersMap[player.player_id]?.team_id || null,
+        team_name: playersMap[player.player_id]?.team_name || null,
+        total_wickets: player.total_wickets,
+      })),
+      player_x_factor: xFactorPlayers.map((player) => ({
+        player_id: player.player_id,
+        player_name: `${playersMap[player.player_id]?.first_name || ""}`,
+        team_id: playersMap[player.player_id]?.team_id || null,
+        team_name: playersMap[player.player_id]?.team_name || null,
+        x_factor_points: player.x_factor_points,
+      })),
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching match insights:", error.message);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+
+
+
+
+
+
+
 
 
 
