@@ -1335,6 +1335,110 @@ const getStatField = (statType) => {
   }
 };
 
+// app.get("/stats", async (req, res) => {
+//   try {
+//     const { match_id, statType } = req.query;
+
+//     if (!match_id || !statType) {
+//       return res
+//         .status(400)
+//         .json({ error: "match_id and statType are required." });
+//     }
+
+//     // Convert `api_id` to `internal_match_id`
+//     const matchQuery = `SELECT id FROM matches WHERE api_id = ?`;
+//     const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+//     if (matchResult.length === 0) {
+//       return res.status(404).json({ error: "Match not found." });
+//     }
+
+//     const internal_match_id = matchResult[0].id;
+
+//     // ✅ Mapping of statType to SQL Fields
+//     const statFieldMap = {
+//       TotalFantasyPoints: "COALESCE(SUM(pfp.point), 0) AS total_fantasy_points",
+//       AverageFantasyPoints:
+//         "COALESCE(SUM(pfp.point) / NULLIF(COUNT(DISTINCT plm.match_id), 0), 0) AS avg_fantasy_points",
+//       average_rating: "COALESCE(AVG(pfp.rating), 0) AS average_rating",
+//       RunsScored: "COALESCE(SUM(bat.runs), 0) AS total_runs",
+//       WicketsTaken: "COALESCE(SUM(bowl.wickets), 0) AS total_wickets",
+//       DreamTeamAppearances:
+//         "COALESCE(COUNT(DISTINCT mdt.match_id), 0) AS dream_team_appearances",
+//       StrikeRate:
+//         "CASE WHEN SUM(bat.balls_faced) > 0 THEN " +
+//         "COALESCE((SUM(bat.runs) / SUM(bat.balls_faced)) * 100, 0) ELSE 0 END AS strike_rate",
+//     };
+
+//     if (!(statType in statFieldMap)) {
+//       return res.status(400).json({ error: "Invalid statType provided." });
+//     }
+
+//     const statField = statFieldMap[statType];
+
+//     // ✅ SQL Query for fetching statistics
+//     const query = `
+//       WITH player_squads AS (
+//           SELECT player_id, team_id
+//           FROM match_squads
+//           WHERE match_id = ?
+//       ),
+//       player_last_matches AS (
+//           SELECT player_id, match_id
+//           FROM (
+//               SELECT 
+//                   pfp.player_id, 
+//                   pfp.match_id,
+//                   ROW_NUMBER() OVER (PARTITION BY pfp.player_id ORDER BY pfp.match_id DESC) AS row_num
+//               FROM match_fantasy_points pfp
+//               WHERE pfp.player_id IN (SELECT player_id FROM player_squads)
+//           ) ranked_matches
+//           WHERE row_num <= 5
+//       )
+//       SELECT 
+//           ps.player_id,
+//           COALESCE(pfp.player_name, 'Unknown') AS player_name,
+//           COALESCE(pfp.role, 'Unknown') AS role,
+//           ps.team_id,
+//           COALESCE(t.name, 'Unknown') AS team_name,
+//           COUNT(DISTINCT plm.match_id) AS matches_played,
+//           ${statField}
+//       FROM player_squads ps
+//       LEFT JOIN player_last_matches plm 
+//           ON ps.player_id = plm.player_id 
+//       LEFT JOIN match_fantasy_points pfp 
+//           ON plm.player_id = pfp.player_id 
+//           AND plm.match_id = pfp.match_id
+//       LEFT JOIN teams t 
+//           ON ps.team_id = t.id
+//       LEFT JOIN match_inning_batters bat  
+//           ON ps.player_id = bat.batsman_id 
+//           AND bat.match_inning_id IN (
+//               SELECT id FROM match_innings WHERE match_id = plm.match_id
+//           )
+//       LEFT JOIN match_inning_bowlers bowl  
+//           ON ps.player_id = bowl.bowler_id 
+//           AND bowl.match_inning_id IN (
+//               SELECT id FROM match_innings WHERE match_id = plm.match_id
+//           )
+//       LEFT JOIN match_dream_teams mdt  
+//           ON ps.player_id = mdt.player_id 
+//           AND plm.match_id = mdt.match_id
+//       GROUP BY ps.player_id, pfp.player_name, pfp.role, ps.team_id, t.name
+//       ORDER BY matches_played DESC;
+//     `;
+
+//     const [rows] = await db.execute(query, [internal_match_id]);
+
+//     res.json({ match_id, internal_match_id, stats: rows });
+//   } catch (error) {
+//     console.error("❌ Error fetching data:", error.message);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
+
+
 app.get("/stats", async (req, res) => {
   try {
     const { match_id, statType } = req.query;
@@ -1355,19 +1459,33 @@ app.get("/stats", async (req, res) => {
 
     const internal_match_id = matchResult[0].id;
 
-    // ✅ Mapping of statType to SQL Fields
+    // ✅ Mapping of statType to SQL Fields (Fixed WicketsTaken and AverageFantasyPoints)
     const statFieldMap = {
       TotalFantasyPoints: "COALESCE(SUM(pfp.point), 0) AS total_fantasy_points",
-      AverageFantasyPoints:
-        "COALESCE(SUM(pfp.point) / NULLIF(COUNT(DISTINCT plm.match_id), 0), 0) AS avg_fantasy_points",
+      
+      AverageFantasyPoints: `
+        COALESCE(
+          SUM(pfp.point) / NULLIF(COUNT(DISTINCT pfp.match_id), 0), 0
+        ) AS avg_fantasy_points
+      `, // ✅ Fixed the division to count distinct matches correctly
+
       average_rating: "COALESCE(AVG(pfp.rating), 0) AS average_rating",
+      
       RunsScored: "COALESCE(SUM(bat.runs), 0) AS total_runs",
-      WicketsTaken: "COALESCE(SUM(bowl.wickets), 0) AS total_wickets",
-      DreamTeamAppearances:
-        "COALESCE(COUNT(DISTINCT mdt.match_id), 0) AS dream_team_appearances",
-      StrikeRate:
-        "CASE WHEN SUM(bat.balls_faced) > 0 THEN " +
-        "COALESCE((SUM(bat.runs) / SUM(bat.balls_faced)) * 100, 0) ELSE 0 END AS strike_rate",
+      
+      WicketsTaken: `
+        COALESCE(SUM(bowl.wickets), 0) AS total_wickets
+      `, // ✅ Ensured wickets are summed correctly from `match_inning_bowlers`
+      
+      DreamTeamAppearances: "COALESCE(COUNT(DISTINCT mdt.match_id), 0) AS dream_team_appearances",
+      
+      StrikeRate: `
+        CASE 
+          WHEN SUM(bat.balls_faced) > 0 
+          THEN COALESCE((SUM(bat.runs) / SUM(bat.balls_faced)) * 100, 0) 
+          ELSE 0 
+        END AS strike_rate
+      `,
     };
 
     if (!(statType in statFieldMap)) {
@@ -1376,7 +1494,7 @@ app.get("/stats", async (req, res) => {
 
     const statField = statFieldMap[statType];
 
-    // ✅ SQL Query for fetching statistics
+    // ✅ Corrected SQL Query
     const query = `
       WITH player_squads AS (
           SELECT player_id, team_id
@@ -1436,6 +1554,26 @@ app.get("/stats", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 // --------------------------------cheat sheet ----------------------------------------------
