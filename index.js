@@ -2819,11 +2819,11 @@ app.get("/team-vs-team", async (req, res) => {
 
     const converted_match_id = matchResult[0].id;
 
-    // Step 2: Fetch Team IDs, Names, and Logos
+    // Step 2: Fetch Team IDs, Names, and Logos (Fixed logo issue)
     const teamQuery = `
       SELECT 
-        m.team_1, t1.name AS teamA_name, t1.logo AS teamA_logo,
-        m.team_2, t2.name AS teamB_name, t2.logo AS teamB_logo
+        m.team_1, t1.name AS teamA_name, COALESCE(t1.logo_url, '') AS teamA_logo,
+        m.team_2, t2.name AS teamB_name, COALESCE(t2.logo_url, '') AS teamB_logo
       FROM matches m
       JOIN teams t1 ON m.team_1 = t1.id
       JOIN teams t2 ON m.team_2 = t2.id
@@ -2851,17 +2851,10 @@ app.get("/team-vs-team", async (req, res) => {
         AND match_status_id = 2  -- Only Completed Matches
       ORDER BY date_start DESC;
     `;
-    const [matches] = await db.execute(matchesQuery, [
-      teamA,
-      teamB,
-      teamB,
-      teamA,
-    ]);
+    const [matches] = await db.execute(matchesQuery, [teamA, teamB, teamB, teamA]);
 
     if (!matches.length) {
-      return res
-        .status(404)
-        .json({ message: "No previous matches found between these teams" });
+      return res.status(404).json({ message: "No previous matches found between these teams" });
     }
 
     // Step 4: Calculate Win Stats
@@ -2892,35 +2885,28 @@ app.get("/team-vs-team", async (req, res) => {
       ORDER BY date_start DESC 
       LIMIT 5;
     `;
-    const [recentMatches] = await db.execute(recentMatchesQuery, [
-      teamA,
-      teamB,
-      teamB,
-      teamA,
-    ]);
+    const [recentMatches] = await db.execute(recentMatchesQuery, [teamA, teamB, teamB, teamA]);
 
-    const formattedRecentMatches = recentMatches.map((match) => {
-      return {
-        match_date: match.date_start,
-        teamA: {
-          id: match.team_1,
-          name: match.team_1 === teamA ? teamA_name : teamB_name,
-          logo: match.team_1 === teamA ? teamA_logo : teamB_logo,
-        },
-        teamB: {
-          id: match.team_2,
-          name: match.team_2 === teamA ? teamA_name : teamB_name,
-          logo: match.team_2 === teamA ? teamA_logo : teamB_logo,
-        },
-        result:
-          match.winning_team_id === teamA
-            ? `${teamA_name} won`
-            : match.winning_team_id === teamB
-            ? `${teamB_name} won`
-            : "No Result",
-        win_margin: match.win_margin || "N/A",
-      };
-    });
+    const formattedRecentMatches = recentMatches.map((match) => ({
+      match_date: match.date_start,
+      teamA: {
+        id: match.team_1,
+        name: match.team_1 === teamA ? teamA_name : teamB_name,
+        logo: match.team_1 === teamA ? teamA_logo : teamB_logo,
+      },
+      teamB: {
+        id: match.team_2,
+        name: match.team_2 === teamA ? teamA_name : teamB_name,
+        logo: match.team_2 === teamA ? teamA_logo : teamB_logo,
+      },
+      result:
+        match.winning_team_id === teamA
+          ? `${teamA_name} won`
+          : match.winning_team_id === teamB
+          ? `${teamB_name} won`
+          : "No Result",
+      win_margin: match.win_margin || "N/A",
+    }));
 
     res.json({
       teams: {
@@ -2948,7 +2934,6 @@ app.get("/team-vs-team", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
 
 
 
