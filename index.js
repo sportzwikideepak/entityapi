@@ -21,7 +21,7 @@ app.use(
 app.get("/matches/:status", async (req, res) => {
   try {
     const { status } = req.params;
-    let { per_page = 80, page = 1 } = req.query;
+    let { per_page = 800, page = 1 } = req.query;
 
     per_page = parseInt(per_page) || 80;
     page = Math.max(parseInt(page) || 1, 1);
