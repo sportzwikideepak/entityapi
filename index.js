@@ -3557,6 +3557,114 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 
 
 
+app.get("/head-to-head-record-new", async (req, res) => {
+  try {
+    const { teamA, teamB } = req.query;
+
+    if (!teamA || !teamB) {
+      return res
+        .status(400)
+        .json({ message: "Both teamA and teamB parameters are required" });
+    }
+
+    // ✅ Step 1: Fetch Last 5 Matches Between Team A and Team B
+    const lastMatchesQuery = `
+      SELECT 
+          m.id AS match_id, 
+          m.api_id, 
+          DATE_FORMAT(m.date_start, '%Y-%m-%d') AS match_date, 
+          m.winning_team_id, 
+          m.win_margin,
+          t1.name AS team_1_name,
+          t2.name AS team_2_name,
+          wt.name AS winning_team_name
+      FROM matches m
+      JOIN teams t1 ON m.team_1 = t1.id
+      JOIN teams t2 ON m.team_2 = t2.id
+      LEFT JOIN teams wt ON m.winning_team_id = wt.id
+      WHERE (m.team_1 = ? AND m.team_2 = ?) OR (m.team_1 = ? AND m.team_2 = ?)
+        AND m.match_status_id = 2
+      ORDER BY m.date_start DESC  
+      LIMIT 5;
+    `;
+
+    const [lastMatches] = await db.execute(lastMatchesQuery, [teamA, teamB, teamB, teamA]);
+
+    // ✅ Step 2: Fetch Historical Stats
+    const historicalStatsQuery = `
+      SELECT 
+          COUNT(*) AS total_matches,
+          SUM(CASE WHEN m.winning_team_id = ? THEN 1 ELSE 0 END) AS teamA_wins,
+          SUM(CASE WHEN m.winning_team_id = ? THEN 1 ELSE 0 END) AS teamB_wins,
+          SUM(CASE WHEN m.winning_team_id IS NULL THEN 1 ELSE 0 END) AS ties
+      FROM matches m
+      WHERE (m.team_1 = ? AND m.team_2 = ?) OR (m.team_1 = ? AND m.team_2 = ?)
+    `;
+
+    const [historicalStats] = await db.execute(historicalStatsQuery, [teamA, teamB, teamA, teamB, teamB, teamA]);
+
+    // ✅ Step 3: Fetch Notable Records (Only for Team A & Team B)
+    const notableRecordsQuery = `
+      SELECT 
+        (SELECT CONCAT(t.name, ' (', mi.score_runs, '/', mi.max_over, ')') 
+         FROM match_innings mi
+         JOIN teams t ON mi.batting_team_id = t.id
+         JOIN matches m ON mi.match_id = m.id
+         WHERE (m.team_1 IN (?, ?) OR m.team_2 IN (?, ?))
+         AND mi.score_runs IS NOT NULL
+         ORDER BY mi.score_runs DESC LIMIT 1) AS highest_team_score,
+
+        (SELECT CONCAT(p.first_name, ' ', p.last_name, ' (', mib.wickets, '/', mib.runs_conceded, ')') 
+         FROM match_inning_bowlers mib
+         JOIN players p ON mib.bowler_id = p.id
+         JOIN match_innings mi ON mib.match_inning_id = mi.id
+         JOIN matches m ON mi.match_id = m.id
+         WHERE (m.team_1 IN (?, ?) OR m.team_2 IN (?, ?))
+         AND mib.wickets > 0
+         ORDER BY mib.wickets DESC, mib.runs_conceded ASC LIMIT 1) AS best_bowling,
+
+        (SELECT CONCAT(p.first_name, ' ', p.last_name, ' (', mibat.runs, '*') 
+         FROM match_inning_batters mibat
+         JOIN players p ON mibat.batsman_id = p.id
+         JOIN match_innings mi ON mibat.match_inning_id = mi.id
+         JOIN matches m ON mi.match_id = m.id
+         WHERE (m.team_1 IN (?, ?) OR m.team_2 IN (?, ?))
+         AND mibat.runs > 0
+         ORDER BY mibat.runs DESC LIMIT 1) AS highest_individual_score;
+    `;
+
+    const [notableRecords] = await db.execute(notableRecordsQuery, [teamA, teamB, teamA, teamB, teamA, teamB, teamA, teamB, teamA, teamB, teamA, teamB]);
+
+    // ✅ Step 4: Format Response Data
+    const lastFiveResults = lastMatches.map((match) => ({
+      match_date: match.match_date,
+      match_result: `${match.team_1_name} vs ${match.team_2_name} - ${match.winning_team_name || "No Result"} won by ${match.win_margin}`,
+      winning_team: match.winning_team_name
+    }));
+
+    const response = {
+      head_to_head_records: {
+        last_5_encounters: lastFiveResults
+      },
+      historical_stats: {
+        total_matches: historicalStats[0].total_matches,
+        teamA_wins: historicalStats[0].teamA_wins,
+        teamB_wins: historicalStats[0].teamB_wins,
+        no_result_or_tied: historicalStats[0].ties
+      },
+      notable_records: {
+        highest_team_score: notableRecords[0].highest_team_score || "Not available",
+        // best_bowling: notableRecords[0].best_bowling || "Not available",
+        // highest_individual_score: notableRecords[0].highest_individual_score || "Not available"
+      }
+    };
+
+    res.json(response);
+  } catch (error) {
+    console.error("❌ Error fetching head-to-head records:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
 
 
 
