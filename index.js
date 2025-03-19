@@ -3457,6 +3457,107 @@ app.get("/venue-pitch-report-new", async (req, res) => {
 
 
 
+app.get("/team-comparison-venue-new", async (req, res) => {
+  try {
+    const { teamA, teamB, match_id } = req.query;
+
+    if (!teamA || !teamB || !match_id) {
+      return res
+        .status(400)
+        .json({ message: "teamA, teamB, and match_id parameters are required" });
+    }
+
+    // ✅ Step 1: Get Venue ID & Venue Name from Match ID
+    const venueQuery = `
+      SELECT v.id AS venue_id, v.name AS venue_name 
+      FROM matches m
+      JOIN venues v ON m.venue_id = v.id
+      WHERE m.id = ? 
+      LIMIT 1;
+    `;
+
+    const [venueResult] = await db.execute(venueQuery, [match_id]);
+
+    if (!venueResult.length) {
+      return res.status(404).json({ error: "Match not found or Venue ID is missing." });
+    }
+
+    const { venue_id, venue_name } = venueResult[0];
+
+    // ✅ Step 2: Fetch the Last 5 Completed Matches at This Venue Involving Either Team
+    const lastMatchesQuery = `
+      SELECT 
+          m.id AS match_id, 
+          m.api_id, 
+          m.date_start, 
+          m.winning_team_id, 
+          m.win_margin,
+          t1.name AS team_1_name,
+          t2.name AS team_2_name,
+          winner_team.name AS winning_team_name
+      FROM matches m
+      JOIN teams t1 ON m.team_1 = t1.id
+      JOIN teams t2 ON m.team_2 = t2.id
+      LEFT JOIN teams winner_team ON m.winning_team_id = winner_team.id
+      WHERE m.venue_id = ? 
+        AND m.match_status_id = 2 
+        AND (m.team_1 = ? OR m.team_2 = ? OR m.team_1 = ? OR m.team_2 = ?)
+      ORDER BY m.date_start DESC  
+      LIMIT 5;
+    `;
+
+    const [lastMatches] = await db.execute(lastMatchesQuery, [venue_id, teamA, teamA, teamB, teamB]);
+
+    if (!lastMatches.length) {
+      return res.status(404).json({ error: "No last 5 completed matches found at this venue for the given teams." });
+    }
+
+    // ✅ Step 3: Calculate Toss Impact (Matches Won Batting First)
+    const tossImpactQuery = `
+      SELECT COUNT(*) AS total_matches,
+             SUM(CASE WHEN m.winning_team_id = m.team_1 THEN 1 ELSE 0 END) AS batting_first_wins
+      FROM matches m
+      WHERE m.venue_id = ? 
+        AND m.match_status_id = 2;
+    `;
+
+    const [tossImpactResult] = await db.execute(tossImpactQuery, [venue_id]);
+    const totalMatches = tossImpactResult[0].total_matches || 0;
+    const battingFirstWins = tossImpactResult[0].batting_first_wins || 0;
+    const tossImpactPercentage = totalMatches > 0 ? ((battingFirstWins / totalMatches) * 100).toFixed(2) : "N/A";
+
+    // ✅ Step 4: Format Match Outcomes & Winning Patterns (With Team Names)
+    const lastFiveResults = lastMatches.map((match) => {
+      return {
+        match_id: match.match_id,
+        api_id: match.api_id,
+        date_start: match.date_start,
+        team_1: match.team_1_name,
+        team_2: match.team_2_name,
+        winning_team: match.winning_team_name || "No Result",
+        win_margin: match.win_margin
+      };
+    });
+
+    const response = {
+      venue: {
+        venue_id: venue_id,
+        venue_name: venue_name
+      },
+      toss_impact: `${tossImpactPercentage}% matches won batting first`,
+      last_5_results: lastFiveResults
+    };
+
+    res.json(response);
+  } catch (error) {
+    console.error("❌ Error fetching team comparison at venue:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+
+
 
 
 
