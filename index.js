@@ -3260,6 +3260,7 @@ app.get("/team-comparison-new", async (req, res) => {
       WITH last_matches_A AS (
           SELECT 
               m.id AS match_id,
+              m.api_id AS api_id,
               ? AS team_id, 
               CASE 
                   WHEN m.team_1 = ? THEN m.team_2 
@@ -3275,6 +3276,7 @@ app.get("/team-comparison-new", async (req, res) => {
       last_matches_B AS (
           SELECT 
               m.id AS match_id,
+              m.api_id AS api_id,
               ? AS team_id, 
               CASE 
                   WHEN m.team_1 = ? THEN m.team_2 
@@ -3295,6 +3297,17 @@ app.get("/team-comparison-new", async (req, res) => {
           ROUND((SUM(CASE WHEN lm.team_id = lm.winning_team_id THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(lm.match_id), 0))) AS win_percentage,
           GROUP_CONCAT(
               CONCAT(
+                  lm.api_id, ':', 
+                  CASE 
+                      WHEN lm.winning_team_id = lm.team_id THEN 'W' 
+                      WHEN lm.winning_team_id IS NULL THEN 'D' 
+                      ELSE 'L' 
+                  END
+              ) 
+              ORDER BY lm.match_id DESC SEPARATOR ', '
+          ) AS recent_form_with_api_ids,
+          GROUP_CONCAT(
+              CONCAT(
                   lm.match_id, ':', 
                   CASE 
                       WHEN lm.winning_team_id = lm.team_id THEN 'W' 
@@ -3303,7 +3316,7 @@ app.get("/team-comparison-new", async (req, res) => {
                   END
               ) 
               ORDER BY lm.match_id DESC SEPARATOR ', '
-          ) AS recent_form_with_ids,
+          ) AS recent_form_with_match_ids,
           GROUP_CONCAT(
               CASE 
                   WHEN lm.winning_team_id = lm.team_id THEN 'W' 
@@ -3334,6 +3347,115 @@ app.get("/team-comparison-new", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+app.get("/venue-pitch-report-new", async (req, res) => {
+  try {
+    const { match_id } = req.query;
+
+    if (!match_id) {
+      return res.status(400).json({ error: "match_id (api_id) is required." });
+    }
+
+    // ✅ Step 1: Get Venue ID from Match ID
+    const matchQuery = `SELECT id, api_id, venue_id FROM matches WHERE api_id = ? LIMIT 1;`;
+    const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+    if (!matchResult.length || !matchResult[0].venue_id) {
+      return res.status(404).json({ error: "Match not found or Venue ID is missing." });
+    }
+
+    const venue_id = matchResult[0].venue_id;
+
+    // ✅ Step 2: Fetch the Last 5 Completed Matches at this Venue
+    const lastMatchesQuery = `
+      SELECT m.id AS match_id, m.api_id, m.date_start, m.team_1, m.team_2, m.winning_team_id
+      FROM matches m
+      WHERE m.venue_id = ? 
+      AND m.match_status_id = 2  
+      ORDER BY m.date_start DESC  
+      LIMIT 5;
+    `;
+    const [lastMatches] = await db.execute(lastMatchesQuery, [venue_id]);
+
+    if (!lastMatches.length) {
+      return res.status(404).json({ error: "No last 5 completed matches found at this venue." });
+    }
+
+    const matchIds = lastMatches.map((m) => m.match_id);
+    
+    if (matchIds.length === 0) {
+      return res.status(404).json({ error: "No valid match IDs found for this venue." });
+    }
+
+    // ✅ Step 3: Fetch First-Inning Averages & Highest Successful Chase
+    const placeholders = matchIds.map(() => "?").join(",");
+    const query = `
+      WITH first_innings_scores AS (
+          SELECT match_id, SUM(score_runs) AS total_score
+          FROM match_innings
+          WHERE match_id IN (${placeholders}) 
+          AND number = 1  
+          GROUP BY match_id
+      ),
+
+      second_innings_scores AS (
+          SELECT mi.match_id, m.winning_team_id, SUM(mi.score_runs) AS total_score
+          FROM match_innings mi
+          JOIN matches m ON mi.match_id = m.id
+          WHERE mi.match_id IN (${placeholders}) 
+          AND mi.number = 2  
+          AND m.winning_team_id IS NOT NULL  -- ✅ Ensures only successful chases are considered
+          GROUP BY mi.match_id, m.winning_team_id
+      )
+
+      SELECT 
+          v.id AS venue_id,
+          v.name AS venue_name,
+          COALESCE(ROUND(SUM(fis.total_score) / NULLIF(COUNT(fis.match_id), 0), 0), 0) AS avg_first_inning_score,
+
+          (SELECT 
+              COALESCE(MAX(sis.total_score), 0)
+          FROM second_innings_scores sis
+      ) AS highest_successful_chase
+
+      FROM venues v
+      LEFT JOIN first_innings_scores fis ON 1=1
+      WHERE v.id = ?;
+    `;
+
+    const params = [...matchIds, ...matchIds, venue_id];
+    const [rows] = await db.execute(query, params);
+
+    if (!rows.length) {
+      return res.status(404).json({ error: "No data available for these matches." });
+    }
+
+    const response = {
+      venue_id: rows[0].venue_id,
+      venue_name: rows[0].venue_name,
+      avg_first_inning_score: rows[0].avg_first_inning_score,
+      highest_successful_chase: rows[0].highest_successful_chase,
+      last_5_matches: lastMatches.map((match) => ({
+        match_id: match.match_id,
+        api_id: match.api_id,
+        date_start: match.date_start,
+        team_1: match.team_1,
+        team_2: match.team_2
+      }))
+    };
+
+    res.json(response);
+
+  } catch (error) {
+    console.error("❌ Error fetching venue pitch report:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+
+
 
 
 
