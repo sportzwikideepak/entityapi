@@ -3251,9 +3251,7 @@ app.get("/team-comparison-new", async (req, res) => {
     const { teamA, teamB } = req.query;
 
     if (!teamA || !teamB) {
-      return res
-        .status(400)
-        .json({ message: "Both teamA and teamB parameters are required" });
+      return res.status(400).json({ message: "Both teamA and teamB parameters are required" });
     }
 
     const query = `
@@ -3288,51 +3286,49 @@ app.get("/team-comparison-new", async (req, res) => {
             AND m.match_status_id = 2
           ORDER BY m.date_start DESC
           LIMIT 5
+      ),
+      combined_matches AS (
+          SELECT * FROM last_matches_A
+          UNION ALL
+          SELECT * FROM last_matches_B
+      ),
+      total_wins AS (
+          SELECT 
+              team_id,
+              COUNT(match_id) AS total_matches,
+              SUM(CASE WHEN team_id = winning_team_id THEN 1 ELSE 0 END) AS wins
+          FROM combined_matches
+          GROUP BY team_id
+      ),
+      probability_calc AS (
+          SELECT 
+              team_id,
+              wins,
+              total_matches,
+              ROUND((wins * 100.0) / NULLIF((SELECT SUM(wins) FROM total_wins), 0), 2) AS win_probability
+          FROM total_wins
       )
       SELECT 
           t.id AS team_id,
           t.name AS team_name,
-          COUNT(lm.match_id) AS total_matches,
-          SUM(CASE WHEN lm.team_id = lm.winning_team_id THEN 1 ELSE 0 END) AS wins,
-          ROUND((SUM(CASE WHEN lm.team_id = lm.winning_team_id THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(lm.match_id), 0))) AS win_percentage,
-          GROUP_CONCAT(
-              CONCAT(
-                  lm.api_id, ':', 
-                  CASE 
-                      WHEN lm.winning_team_id = lm.team_id THEN 'W' 
-                      WHEN lm.winning_team_id IS NULL THEN 'D' 
-                      ELSE 'L' 
-                  END
-              ) 
-              ORDER BY lm.match_id DESC SEPARATOR ', '
-          ) AS recent_form_with_api_ids,
-          GROUP_CONCAT(
-              CONCAT(
-                  lm.match_id, ':', 
-                  CASE 
-                      WHEN lm.winning_team_id = lm.team_id THEN 'W' 
-                      WHEN lm.winning_team_id IS NULL THEN 'D' 
-                      ELSE 'L' 
-                  END
-              ) 
-              ORDER BY lm.match_id DESC SEPARATOR ', '
-          ) AS recent_form_with_match_ids,
+          t.short_name AS team_short_name,  -- ✅ Added Short Name
+          COALESCE(pc.total_matches, 0) AS total_matches,
+          COALESCE(pc.wins, 0) AS wins,
+          COALESCE(ROUND((pc.wins * 100.0) / NULLIF(pc.total_matches, 0), 2), 0) AS win_percentage,
+          COALESCE(pc.win_probability, 50) AS win_probability, 
           GROUP_CONCAT(
               CASE 
-                  WHEN lm.winning_team_id = lm.team_id THEN 'W' 
-                  WHEN lm.winning_team_id IS NULL THEN 'D' 
+                  WHEN cm.winning_team_id = cm.team_id THEN 'W' 
+                  WHEN cm.winning_team_id IS NULL THEN 'D' 
                   ELSE 'L' 
               END 
-              ORDER BY lm.match_id DESC SEPARATOR ', '
+              ORDER BY cm.match_id DESC SEPARATOR ', '
           ) AS recent_form_simple
-      FROM (
-          SELECT * FROM last_matches_A
-          UNION ALL
-          SELECT * FROM last_matches_B
-      ) AS lm 
-      JOIN teams t ON lm.team_id = t.id
-      WHERE lm.team_id IN (?, ?)  
-      GROUP BY t.id, t.name;
+      FROM combined_matches cm
+      JOIN teams t ON cm.team_id = t.id
+      LEFT JOIN probability_calc pc ON t.id = pc.team_id
+      WHERE cm.team_id IN (?, ?)
+      GROUP BY t.id, t.name, t.short_name, pc.total_matches, pc.wins, pc.win_probability;
     `;
 
     const [results] = await db.execute(query, [
@@ -3347,6 +3343,8 @@ app.get("/team-comparison-new", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
 
 
 app.get("/venue-pitch-report-new", async (req, res) => {
