@@ -3584,15 +3584,12 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 
 
 
-
 app.get("/head-to-head-record-new", async (req, res) => {
   try {
     const { teamA, teamB } = req.query;
 
     if (!teamA || !teamB) {
-      return res
-        .status(400)
-        .json({ message: "Both teamA and teamB parameters are required" });
+      return res.status(400).json({ message: "Both teamA and teamB parameters are required" });
     }
 
     // ✅ Step 0: Fetch team names and short names
@@ -3630,7 +3627,7 @@ app.get("/head-to-head-record-new", async (req, res) => {
     `;
     const [lastMatches] = await db.execute(lastMatchesQuery, [teamA, teamB, teamB, teamA]);
 
-    // ✅ Step 2: Historical Stats (Only Completed Matches)
+    // ✅ Step 2: Historical Stats
     const historicalStatsQuery = `
       SELECT 
           COUNT(*) AS total_matches,
@@ -3647,18 +3644,21 @@ app.get("/head-to-head-record-new", async (req, res) => {
       teamB, teamA
     ]);
 
-    // ✅ Step 3: Notable Records (Only Between Team A & B and Completed Matches)
+    // ✅ Step 3: Notable Records
     const notableRecordsQuery = `
       SELECT 
-        (SELECT CONCAT(t.name, ' (', mi.score_runs, '/', mi.max_over, ')') 
+        -- ✅ Highest Team Score with accurate wickets
+        (SELECT CONCAT(t.name, ' (', mi.scores_full, ')') 
          FROM match_innings mi
          JOIN teams t ON mi.batting_team_id = t.id
          JOIN matches m ON mi.match_id = m.id
          WHERE ((m.team_1 = ? AND m.team_2 = ?) OR (m.team_1 = ? AND m.team_2 = ?))
            AND m.match_status_id = 2
-           AND mi.score_runs IS NOT NULL
-         ORDER BY mi.score_runs DESC LIMIT 1) AS highest_team_score,
+           AND mi.scores_full IS NOT NULL
+         ORDER BY mi.score_runs DESC
+         LIMIT 1) AS highest_team_score,
 
+        -- ✅ Best Bowling
         (SELECT CONCAT(p.first_name, ' ', p.last_name, ' (', mib.wickets, '/', mib.runs_conceded, ')') 
          FROM match_inning_bowlers mib
          JOIN players p ON mib.bowler_id = p.id
@@ -3667,9 +3667,11 @@ app.get("/head-to-head-record-new", async (req, res) => {
          WHERE ((m.team_1 = ? AND m.team_2 = ?) OR (m.team_1 = ? AND m.team_2 = ?))
            AND m.match_status_id = 2
            AND mib.wickets > 0
-         ORDER BY mib.wickets DESC, mib.runs_conceded ASC LIMIT 1) AS best_bowling,
+         ORDER BY mib.wickets DESC, mib.runs_conceded ASC
+         LIMIT 1) AS best_bowling,
 
-        (SELECT CONCAT(p.first_name, ' ', p.last_name, ' (', mibat.runs, '*') 
+        -- ✅ Highest Individual Score
+        (SELECT CONCAT(p.first_name, ' ', p.last_name, ' (', mibat.runs, '*)') 
          FROM match_inning_batters mibat
          JOIN players p ON mibat.batsman_id = p.id
          JOIN match_innings mi ON mibat.match_inning_id = mi.id
@@ -3677,7 +3679,8 @@ app.get("/head-to-head-record-new", async (req, res) => {
          WHERE ((m.team_1 = ? AND m.team_2 = ?) OR (m.team_1 = ? AND m.team_2 = ?))
            AND m.match_status_id = 2
            AND mibat.runs > 0
-         ORDER BY mibat.runs DESC LIMIT 1) AS highest_individual_score;
+         ORDER BY mibat.runs DESC
+         LIMIT 1) AS highest_individual_score;
     `;
     const [notableRecords] = await db.execute(notableRecordsQuery, [
       teamA, teamB, teamB, teamA, // highest_team_score
@@ -3725,6 +3728,7 @@ app.get("/head-to-head-record-new", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 
 
