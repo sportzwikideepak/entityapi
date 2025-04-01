@@ -102,6 +102,84 @@ app.get("/matches/:status", async (req, res) => {
 });
 
 
+app.get("/matches/ipl/:status", async (req, res) => {
+  try {
+    const { status } = req.params;
+    let { per_page = 800, page = 1 } = req.query;
+
+    const tournamentId = 1; // IPL
+
+    per_page = parseInt(per_page) || 80;
+    page = Math.max(parseInt(page) || 1, 1);
+    const offset = (page - 1) * per_page;
+
+    let statusCondition = "";
+    let orderBy = "";
+
+    if (status === "upcoming") {
+      statusCondition = `matches.match_status_id = 1 AND matches.date_start >= NOW()`;
+      orderBy = "matches.date_start ASC";
+    } else if (status === "live") {
+      statusCondition = `matches.match_status_id = 3`;
+      orderBy = "matches.date_start DESC";
+    } else if (status === "completed") {
+      statusCondition = `matches.match_status_id = 2 AND matches.date_start <= NOW()`;
+      orderBy = "matches.date_start DESC";
+    } else {
+      return res.status(400).json({ message: "Invalid status. Use upcoming, live, or completed." });
+    }
+
+    const query = `
+      SELECT 
+        matches.id AS match_id, 
+        matches.api_id AS api_id,
+        matches.name AS title, 
+        matches.date_start, 
+        matches.match_status_id,
+        t1.id AS teamA_id, t1.name AS teamA_name, t1.short_name AS teamA_short, 
+        t1.logo_url AS teamA_logo,
+        t2.id AS teamB_id, t2.name AS teamB_name, t2.short_name AS teamB_short, 
+        t2.logo_url AS teamB_logo,
+        venues.id AS venue_id, venues.name AS venue_name, venues.city AS venue_city, venues.country AS venue_country,
+        competitions.id AS competition_id, competitions.name AS competition_name, competitions.abbr AS competition_abbr, 
+        match_categories.id AS match_category_id, match_categories.name AS match_category_name
+      FROM matches
+      JOIN teams t1 ON matches.team_1 = t1.id
+      JOIN teams t2 ON matches.team_2 = t2.id
+      JOIN venues ON matches.venue_id = venues.id
+      LEFT JOIN competitions ON matches.competition_id = competitions.id
+      LEFT JOIN match_categories ON competitions.match_category_id = match_categories.id
+      WHERE competitions.tournament_id = ? AND ${statusCondition}
+      ORDER BY ${orderBy}
+      LIMIT ? OFFSET ?;
+    `;
+
+    const [matches] = await db.execute(query, [tournamentId, per_page, offset]);
+
+    const countQuery = `
+      SELECT COUNT(*) AS total 
+      FROM matches
+      JOIN competitions ON matches.competition_id = competitions.id
+      WHERE competitions.tournament_id = ? AND ${statusCondition};
+    `;
+    const [countResult] = await db.execute(countQuery, [tournamentId]);
+    const totalMatches = countResult[0].total;
+    const totalPages = Math.ceil(totalMatches / per_page);
+
+    res.json({
+      total_matches: totalMatches,
+      per_page,
+      page,
+      total_pages: totalPages,
+      matches: matches,
+    });
+
+  } catch (error) {
+    console.error("❌ Error fetching IPL matches:", error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 
 
 
