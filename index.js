@@ -3837,7 +3837,6 @@ app.get("/head-to-head-record-new", async (req, res) => {
           DATE_FORMAT(m.date_start, '%Y-%m-%d') AS match_date, 
           m.winning_team_id, 
           m.win_margin,
-          m.name AS match_name,
           m.slug AS match_slug,
           m.status_note AS match_status,
           t1.name AS team_1_name,
@@ -3920,7 +3919,7 @@ app.get("/head-to-head-record-new", async (req, res) => {
       match_date: match.match_date,
       match_result: `${match.team_1_name} vs ${match.team_2_name} - ${match.winning_team_name || "No Result"} won by ${match.win_margin || "N/A"}`,
       winning_team: match.winning_team_name || "No Result",
-      match_name: match.match_name,
+      match_name: `${teamAInfo.short_name} vs ${teamBInfo.short_name}`,
       match_slug: match.match_slug,
       match_status: match.match_status || "No Status"
     }));
@@ -3958,6 +3957,7 @@ app.get("/head-to-head-record-new", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 
 
