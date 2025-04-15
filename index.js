@@ -4086,3 +4086,149 @@ app.get("/match/:match_id/top-captains-new", async (req, res) => {
 
 
 
+
+
+
+app.get("/player-stats-ipl", async (req, res) => {
+  try {
+    const { match_id } = req.query;
+    if (!match_id) return res.status(400).json({ error: "match_id is required" });
+
+    const [matchResult] = await db.execute(
+      `SELECT id, venue_id FROM matches WHERE api_id = ?`, [match_id]
+    );
+    if (!matchResult.length) return res.status(404).json({ error: "Match not found" });
+
+    const actual_match_id = matchResult[0].id;
+    const venue_id = matchResult[0].venue_id;
+
+    const [iplMatches] = await db.execute(`
+      SELECT m.id FROM matches m
+      JOIN competitions c ON m.competition_id = c.id
+      WHERE c.name = 'Indian Premier League' AND c.season = '2025'
+    `);
+    const iplMatchIds = iplMatches.map(m => m.id);
+    if (!iplMatchIds.length) return res.status(404).json({ error: "No IPL 2025 matches found" });
+
+    const [squadPlayers] = await db.execute(`
+      SELECT ms.player_id, ms.team_id, p.first_name, p.last_name, p.playing_role, t.name AS team_name
+      FROM match_squads ms
+      JOIN players p ON ms.player_id = p.id
+      JOIN teams t ON ms.team_id = t.id
+      WHERE ms.match_id = ?`, [actual_match_id]
+    );
+    if (!squadPlayers.length) return res.status(404).json({ error: "No squad found for match" });
+
+    const playerIds = squadPlayers.map(p => p.player_id);
+    const playerIdsList = playerIds.length ? `(${playerIds.join(",")})` : "(NULL)";
+    const matchIdsList = `(${iplMatchIds.join(",")})`;
+
+    const [iplStats] = await db.execute(`
+      SELECT player_id, 
+             SUM(point) AS total_points, 
+             COUNT(DISTINCT match_id) AS total_matches
+      FROM match_fantasy_points
+      WHERE player_id IN ${playerIdsList}
+      AND match_id IN ${matchIdsList}
+      GROUP BY player_id
+    `);
+    const iplStatsMap = Object.fromEntries(iplStats.map(row => [row.player_id, row]));
+
+    const [dreamStats] = await db.execute(`
+      SELECT player_id, 
+             COUNT(*) AS in_dream_team, 
+             SUM(is_captain) AS captain_count, 
+             SUM(is_vice_captain) AS vice_captain_count
+      FROM match_dream_teams
+      WHERE player_id IN ${playerIdsList}
+      AND match_id IN ${matchIdsList}
+      GROUP BY player_id
+    `);
+    const dreamStatsMap = Object.fromEntries(dreamStats.map(row => [row.player_id, row]));
+
+    const [battingStats] = await db.execute(`
+      SELECT batsman_id AS player_id, SUM(runs) AS total_runs
+      FROM match_inning_batters
+      WHERE batsman_id IN ${playerIdsList}
+      AND match_inning_id IN (
+        SELECT id FROM match_innings WHERE match_id IN ${matchIdsList}
+      )
+      GROUP BY batsman_id
+    `);
+    const battingMap = Object.fromEntries(battingStats.map(row => [row.player_id, row.total_runs]));
+
+    const [bowlingStats] = await db.execute(`
+      SELECT bowler_id AS player_id, SUM(wickets) AS total_wickets
+      FROM match_inning_bowlers
+      WHERE bowler_id IN ${playerIdsList}
+      AND match_inning_id IN (
+        SELECT id FROM match_innings WHERE match_id IN ${matchIdsList}
+      )
+      GROUP BY bowler_id
+    `);
+    const bowlingMap = Object.fromEntries(bowlingStats.map(row => [row.player_id, row.total_wickets]));
+
+    // Get last match for each player in IPL 2025
+    const [lastMatchQuery] = await db.execute(`
+      SELECT player_id, MAX(match_id) AS last_match_id
+      FROM match_fantasy_points
+      WHERE player_id IN ${playerIdsList}
+      AND match_id IN ${matchIdsList}
+      GROUP BY player_id
+    `);
+    const lastMatchMap = Object.fromEntries(lastMatchQuery.map(row => [row.player_id, row.last_match_id]));
+
+    // Now get last match inning IDs
+    const lastMatchIds = [...new Set(Object.values(lastMatchMap))];
+    const [lastInnings] = await db.execute(`
+      SELECT id, match_id FROM match_innings
+      WHERE match_id IN (${lastMatchIds.join(',')})
+    `);
+    const matchToInningMap = {};
+    lastInnings.forEach(i => {
+      if (!matchToInningMap[i.match_id]) matchToInningMap[i.match_id] = [];
+      matchToInningMap[i.match_id].push(i.id);
+    });
+
+    // Get last match runs
+    const [lastRuns] = await db.execute(`
+      SELECT batsman_id AS player_id, match_inning_id, runs
+      FROM match_inning_batters
+      WHERE batsman_id IN ${playerIdsList}
+      AND match_inning_id IN (${lastInnings.map(i => i.id).join(',')})
+    `);
+    const lastMatchRunsMap = {};
+    lastRuns.forEach(row => {
+      const match_id = Object.entries(matchToInningMap).find(([k, v]) => v.includes(row.match_inning_id))?.[0];
+      const player = row.player_id;
+      if (match_id == lastMatchMap[player]) {
+        lastMatchRunsMap[player] = (lastMatchRunsMap[player] || 0) + row.runs;
+      }
+    });
+
+    const finalStats = squadPlayers.map(player => ({
+      player_id: player.player_id,
+      player_name: `${player.first_name}`,
+      team_name: player.team_name,
+      role: player.playing_role,
+
+      total_points: iplStatsMap[player.player_id]?.total_points || 0,
+      total_matches: iplStatsMap[player.player_id]?.total_matches || 0,
+
+      total_runs: battingMap[player.player_id] || 0,
+      total_wickets: bowlingMap[player.player_id] || 0,
+      last_match_runs: lastMatchRunsMap[player.player_id] || 0,
+
+      in_dream_team: dreamStatsMap[player.player_id]?.in_dream_team || 0,
+      captain_count: dreamStatsMap[player.player_id]?.captain_count || 0,
+      vice_captain_count: dreamStatsMap[player.player_id]?.vice_captain_count || 0,
+    }));
+
+    res.json(finalStats);
+  } catch (error) {
+    console.error("Error fetching IPL 2025 player stats:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
