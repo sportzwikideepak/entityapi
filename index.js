@@ -87,6 +87,24 @@ app.get("/matches/:status", async (req, res) => {
     const totalMatches = countResult[0].total;
     const totalPages = Math.ceil(totalMatches / per_page);
 
+
+    const formatDate = (dateObj) => {
+      const pad = (n) => n.toString().padStart(2, '0');
+      const yyyy = dateObj.getFullYear();
+      const mm = pad(dateObj.getMonth() + 1);
+      const dd = pad(dateObj.getDate());
+      const hh = pad(dateObj.getHours());
+      const mi = pad(dateObj.getMinutes());
+      const ss = pad(dateObj.getSeconds());
+      return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+    };
+    
+    matches.forEach(match => {
+      if (match.date_start instanceof Date) {
+        match.date_start = formatDate(match.date_start);
+      }
+    });
+
     res.json({
       total_matches: totalMatches,
       per_page,
