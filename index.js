@@ -3019,15 +3019,108 @@ app.get('/key-insight', async (req, res) => {
 
 
 // --------------------captain vice captain home page-------------------------------
+// app.get("/match/:match_id/captains", async (req, res) => {
+//   try {
+//     const { match_id } = req.params;
+
+//     // 🔹 Step 1: Get actual match_id from api_id
+//     const matchQuery = `
+//       SELECT m.id AS match_id, m.api_id 
+//       FROM matches m
+//       WHERE m.api_id = ?
+//     `;
+//     const [matchData] = await db.execute(matchQuery, [match_id]);
+
+//     if (matchData.length === 0) {
+//       return res.status(404).json({ message: "Match not found" });
+//     }
+
+//     const match_id_actual = matchData[0].match_id;
+
+//     // 🔹 Step 2: Get all players in squad for the match
+//     const squadQuery = `
+//       SELECT ms.player_id, p.first_name, p.last_name, p.short_name, 
+//              p.playing_role, ms.role_str, t.name AS team_name, t.short_name AS team_short
+//       FROM match_squads ms
+//       JOIN players p ON ms.player_id = p.id
+//       JOIN teams t ON ms.team_id = t.id
+//       WHERE ms.match_id = ?
+//     `;
+//     const [squadPlayers] = await db.execute(squadQuery, [match_id_actual]);
+
+//     if (squadPlayers.length === 0) {
+//       return res.status(404).json({ message: "No players found in squads" });
+//     }
+
+//     const IPL_COMPETITION_ID = 1;
+//     let playerStats = [];
+
+//     for (const player of squadPlayers) {
+//       const playerId = player.player_id;
+
+//       // 🔹 Step 3: Get last 5 IPL matches for the player
+//       const last5IPLMatchesQuery = `
+//         SELECT SUM(mfp.point) as total_points, 
+//                AVG(mfp.point) as avg_points, 
+//                COUNT(DISTINCT mfp.match_id) as total_matches
+//         FROM (
+//           SELECT mfp.*
+//           FROM match_fantasy_points mfp
+//           JOIN matches m ON mfp.match_id = m.id
+//           WHERE mfp.player_id = ?
+//             AND m.competition_id = ?
+//           ORDER BY m.date_start DESC
+//           LIMIT 5
+//         ) AS recent_matches
+//       `;
+//       const [overallPoints] = await db.execute(last5IPLMatchesQuery, [playerId, IPL_COMPETITION_ID]);
+
+//       const totalMatches = overallPoints[0].total_matches || 0;
+
+//       // 🔹 Optional: Only include players with at least 2 IPL matches
+//       if (totalMatches >= 2) {
+//         playerStats.push({
+//           player_id: playerId,
+//           player_name: `${player.first_name} ${player.last_name || ""}`.trim(),
+//           short_name: player.short_name,
+//           team_name: player.team_name,
+//           team_short: player.team_short,
+//           playing_role: player.playing_role,
+//           role_str: player.role_str,
+//           total_points: overallPoints[0].total_points || 0,
+//           avg_points: overallPoints[0].avg_points || 0,
+//           total_matches: totalMatches,
+//         });
+//       }
+//     }
+
+//     // 🔹 Step 4: Sort players by highest total points
+//     playerStats.sort((a, b) => b.total_points - a.total_points);
+
+//     const captain = playerStats.length > 0 ? playerStats[0] : null;
+//     const viceCaptain = playerStats.length > 1 ? playerStats[1] : null;
+
+//     res.json({
+//       match_id: match_id_actual,
+//       api_id: match_id,
+//       captain,
+//       vice_captain: viceCaptain,
+//     });
+//   } catch (error) {
+//     console.error("❌ Error fetching captains:", error.message);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// });
+
 
 app.get("/match/:match_id/captains", async (req, res) => {
   try {
     const { match_id } = req.params;
 
-    // 🔹 Fetch match_id using api_id
     const matchQuery = `
-      SELECT m.id AS match_id, m.api_id 
+      SELECT m.id AS match_id, m.api_id, m.competition_id, c.tournament_id
       FROM matches m
+      JOIN competitions c ON m.competition_id = c.id
       WHERE m.api_id = ?
     `;
     const [matchData] = await db.execute(matchQuery, [match_id]);
@@ -3037,8 +3130,8 @@ app.get("/match/:match_id/captains", async (req, res) => {
     }
 
     const match_id_actual = matchData[0].match_id;
+    const tournament_id = matchData[0].tournament_id;
 
-    // 🔹 Fetch squad players for today's match
     const squadQuery = `
       SELECT ms.player_id, p.first_name, p.last_name, p.short_name, 
              p.playing_role, ms.role_str, t.name AS team_name, t.short_name AS team_short
@@ -3058,32 +3151,44 @@ app.get("/match/:match_id/captains", async (req, res) => {
     for (const player of squadPlayers) {
       const playerId = player.player_id;
 
-      // 🔹 Fetch total fantasy points in last 5 matches
-      const last5MatchesQuery = `
-        SELECT SUM(point) as total_points, AVG(point) as avg_points, COUNT(DISTINCT match_id) as total_matches 
+      const last5Query = `
+        SELECT SUM(point) as total_points, 
+               AVG(point) as avg_points, 
+               COUNT(DISTINCT match_id) as total_matches
         FROM (
-          SELECT * FROM match_fantasy_points WHERE player_id = ? ORDER BY match_id DESC LIMIT 5
-        ) as recent_matches`;
-      const [overallPoints] = await db.execute(last5MatchesQuery, [playerId]);
+          SELECT mfp.point, mfp.match_id
+          FROM match_fantasy_points mfp
+          JOIN matches m ON m.id = mfp.match_id
+          JOIN competitions c ON m.competition_id = c.id
+          WHERE mfp.player_id = ?
+            AND c.tournament_id = ?
+          ORDER BY m.date_start DESC
+          LIMIT 5
+        ) AS recent_matches
+      `;
 
-      playerStats.push({
-        player_id: playerId,
-        player_name: `${player.first_name} ${player.last_name || ""}`.trim(),
-        short_name: player.short_name,
-        team_name: player.team_name,  // 🔹 Team name included
-        team_short: player.team_short,  // 🔹 Short team name included
-        playing_role: player.playing_role,
-        role_str: player.role_str,
-        total_points: overallPoints[0].total_points || 0,
-        avg_points: overallPoints[0].avg_points || 0,
-        total_matches: overallPoints[0].total_matches || 0,
-      });
+      const [pointsData] = await db.execute(last5Query, [playerId, tournament_id]);
+
+      const totalMatches = pointsData[0].total_matches || 0;
+
+      if (totalMatches >= 2) {
+        playerStats.push({
+          player_id: playerId,
+          player_name: `${player.first_name} ${player.last_name || ""}`.trim(),
+          short_name: player.short_name,
+          team_name: player.team_name,
+          team_short: player.team_short,
+          playing_role: player.playing_role,
+          role_str: player.role_str,
+          total_points: pointsData[0].total_points || 0,
+          avg_points: pointsData[0].avg_points || 0,
+          total_matches: totalMatches,
+        });
+      }
     }
 
-    // 🔹 Sort players based on total fantasy points (highest first)
     playerStats.sort((a, b) => b.total_points - a.total_points);
 
-    // 🔹 Select the **top player as Captain** and **2nd best as Vice-Captain**
     const captain = playerStats.length > 0 ? playerStats[0] : null;
     const viceCaptain = playerStats.length > 1 ? playerStats[1] : null;
 
@@ -3098,6 +3203,9 @@ app.get("/match/:match_id/captains", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+
 
 
 
