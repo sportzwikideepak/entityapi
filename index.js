@@ -4453,3 +4453,59 @@ app.post("/impact-player", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
+
+
+app.get('/impact-player', async (req, res) => {
+  try {
+    const query = `
+      SELECT 
+        id,
+        api_id,
+        match_id,
+        team_id,
+        team_name,
+        batting_impact,
+        fielding_impact
+      FROM mygame_impact_players
+      ORDER BY id DESC
+    `;
+    const [entries] = await db.execute(query);
+
+    const formatted = entries.map(e => ({
+      ...e,
+      batting_impact: JSON.parse(e.batting_impact || '[]'),
+      fielding_impact: JSON.parse(e.fielding_impact || '[]')
+    }));
+
+    res.json({ entries: formatted });
+  } catch (error) {
+    console.error('Error fetching impact player entries:', error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+
+
+app.get('/impact-player/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const [rows] = await db.execute(
+      `SELECT * FROM mygame_impact_players WHERE id = ?`,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Entry not found' });
+    }
+
+    const entry = rows[0];
+    entry.batting_impact = JSON.parse(entry.batting_impact || '[]');
+    entry.fielding_impact = JSON.parse(entry.fielding_impact || '[]');
+
+    res.json({ entry });
+  } catch (error) {
+    console.error('Error fetching entry by ID:', error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
