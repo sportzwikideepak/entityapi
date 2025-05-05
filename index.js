@@ -5,12 +5,14 @@ const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const db = require("./config/db");
 
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(express.json());
 app.use(helmet());
 app.use(cors());
+
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -4358,3 +4360,96 @@ app.get("/player-stats-ipl", async (req, res) => {
 });
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// ---------------------adminpanel --------------------------
+
+
+app.post("/impact-player", async (req, res) => {
+  try {
+    const {
+      match_id,
+      teamA_id,
+      teamB_id,
+      teamA_batting,
+      teamA_fielding,
+      teamB_batting,
+      teamB_fielding
+    } = req.body;
+
+    if (
+      !match_id || !teamA_id || !teamB_id ||
+      !Array.isArray(teamA_batting) || !Array.isArray(teamA_fielding) ||
+      !Array.isArray(teamB_batting) || !Array.isArray(teamB_fielding)
+    ) {
+      return res.status(400).json({
+        message: "All match and team data with player arrays are required"
+      });
+    }
+
+    // Save data for Team A
+    const teamAInsertQuery = `
+      INSERT INTO mygame_impact_players 
+        (match_id, team_id, batting_impact, fielding_impact) 
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        batting_impact = VALUES(batting_impact),
+        fielding_impact = VALUES(fielding_impact)
+    `;
+    await db.execute(teamAInsertQuery, [
+      match_id,
+      teamA_id,
+      JSON.stringify(teamA_batting),
+      JSON.stringify(teamA_fielding)
+    ]);
+
+    // Save data for Team B
+    const teamBInsertQuery = `
+      INSERT INTO mygame_impact_players 
+        (match_id, team_id, batting_impact, fielding_impact) 
+      VALUES (?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        batting_impact = VALUES(batting_impact),
+        fielding_impact = VALUES(fielding_impact)
+    `;
+    await db.execute(teamBInsertQuery, [
+      match_id,
+      teamB_id,
+      JSON.stringify(teamB_batting),
+      JSON.stringify(teamB_fielding)
+    ]);
+
+    return res.json({ message: "Impact players added successfully" });
+  } catch (err) {
+    console.error("❌ Error saving impact players:", err.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
