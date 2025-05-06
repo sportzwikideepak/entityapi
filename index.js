@@ -3902,6 +3902,9 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 
 
 
+
+
+
 // app.get("/head-to-head-record-new", async (req, res) => {
 //   try {
 //     const { teamA, teamB } = req.query;
@@ -3910,7 +3913,7 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 //       return res.status(400).json({ message: "Both teamA and teamB parameters are required" });
 //     }
 
-//     // ✅ Step 0: Fetch team names and short names
+//     // Step 0: Fetch team names and short names
 //     const [teamsInfo] = await db.execute(
 //       `SELECT id, name, short_name FROM teams WHERE id IN (?, ?)`,
 //       [teamA, teamB]
@@ -3923,7 +3926,7 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 //       return res.status(404).json({ message: "Invalid team IDs provided" });
 //     }
 
-//     // ✅ Step 1: Fetch Last 5 Completed Matches Between Team A and Team B
+//     // Step 1: Fetch Last 5 Completed Matches Between Team A and Team B
 //     const lastMatchesQuery = `
 //       SELECT 
 //           m.id AS match_id, 
@@ -3931,6 +3934,8 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 //           DATE_FORMAT(m.date_start, '%Y-%m-%d') AS match_date, 
 //           m.winning_team_id, 
 //           m.win_margin,
+//           m.slug AS match_slug,
+//           m.status_note AS match_status,
 //           t1.name AS team_1_name,
 //           t2.name AS team_2_name,
 //           wt.name AS winning_team_name
@@ -3945,7 +3950,7 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 //     `;
 //     const [lastMatches] = await db.execute(lastMatchesQuery, [teamA, teamB, teamB, teamA]);
 
-//     // ✅ Step 2: Historical Stats
+//     // Step 2: Historical Stats
 //     const historicalStatsQuery = `
 //       SELECT 
 //           COUNT(*) AS total_matches,
@@ -3962,10 +3967,10 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 //       teamB, teamA
 //     ]);
 
-//     // ✅ Step 3: Notable Records
+//     // Step 3: Notable Records
 //     const notableRecordsQuery = `
 //       SELECT 
-//         -- ✅ Highest Team Score with accurate wickets
+//         -- Highest Team Score
 //         (SELECT CONCAT(t.name, ' (', mi.scores_full, ')') 
 //          FROM match_innings mi
 //          JOIN teams t ON mi.batting_team_id = t.id
@@ -3976,7 +3981,7 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 //          ORDER BY mi.score_runs DESC
 //          LIMIT 1) AS highest_team_score,
 
-//         -- ✅ Best Bowling
+//         -- Best Bowling
 //         (SELECT CONCAT(p.first_name, ' ', p.last_name, ' (', mib.wickets, '/', mib.runs_conceded, ')') 
 //          FROM match_inning_bowlers mib
 //          JOIN players p ON mib.bowler_id = p.id
@@ -3988,7 +3993,7 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 //          ORDER BY mib.wickets DESC, mib.runs_conceded ASC
 //          LIMIT 1) AS best_bowling,
 
-//         -- ✅ Highest Individual Score
+//         -- Highest Individual Score
 //         (SELECT CONCAT(p.first_name, ' ', p.last_name, ' (', mibat.runs, '*)') 
 //          FROM match_inning_batters mibat
 //          JOIN players p ON mibat.batsman_id = p.id
@@ -4006,11 +4011,14 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 //       teamA, teamB, teamB, teamA  // highest_individual_score
 //     ]);
 
-//     // ✅ Step 4: Format Response
+//     // Step 4: Format Response
 //     const lastFiveResults = lastMatches.map((match) => ({
 //       match_date: match.match_date,
 //       match_result: `${match.team_1_name} vs ${match.team_2_name} - ${match.winning_team_name || "No Result"} won by ${match.win_margin || "N/A"}`,
-//       winning_team: match.winning_team_name || "No Result"
+//       winning_team: match.winning_team_name || "No Result",
+//       match_name: `${teamAInfo.short_name} vs ${teamBInfo.short_name}`,
+//       match_slug: match.match_slug,
+//       match_status: match.match_status || "No Status"
 //     }));
 
 //     const response = {
@@ -4048,6 +4056,8 @@ app.get("/team-comparison-venue-new", async (req, res) => {
 // });
 
 
+
+
 app.get("/head-to-head-record-new", async (req, res) => {
   try {
     const { teamA, teamB } = req.query;
@@ -4077,8 +4087,8 @@ app.get("/head-to-head-record-new", async (req, res) => {
           DATE_FORMAT(m.date_start, '%Y-%m-%d') AS match_date, 
           m.winning_team_id, 
           m.win_margin,
-          m.slug AS match_slug,
-          m.status_note AS match_status,
+          m.slug,
+          m.status_note,
           t1.name AS team_1_name,
           t2.name AS team_2_name,
           wt.name AS winning_team_name
@@ -4110,7 +4120,7 @@ app.get("/head-to-head-record-new", async (req, res) => {
       teamB, teamA
     ]);
 
-    // Step 3: Notable Records
+    // Step 3: Notable Records (including lowest_team_score)
     const notableRecordsQuery = `
       SELECT 
         -- Highest Team Score
@@ -4146,22 +4156,36 @@ app.get("/head-to-head-record-new", async (req, res) => {
            AND m.match_status_id = 2
            AND mibat.runs > 0
          ORDER BY mibat.runs DESC
-         LIMIT 1) AS highest_individual_score;
+         LIMIT 1) AS highest_individual_score,
+
+        -- Lowest Team Score
+        (SELECT CONCAT(t.name, ' (', mi.scores_full, ')') 
+         FROM match_innings mi
+         JOIN teams t ON mi.batting_team_id = t.id
+         JOIN matches m ON mi.match_id = m.id
+         WHERE ((m.team_1 = ? AND m.team_2 = ?) OR (m.team_1 = ? AND m.team_2 = ?))
+           AND m.match_status_id = 2
+           AND mi.scores_full IS NOT NULL
+         ORDER BY mi.score_runs ASC
+         LIMIT 1) AS lowest_team_score
     `;
     const [notableRecords] = await db.execute(notableRecordsQuery, [
       teamA, teamB, teamB, teamA, // highest_team_score
       teamA, teamB, teamB, teamA, // best_bowling
-      teamA, teamB, teamB, teamA  // highest_individual_score
+      teamA, teamB, teamB, teamA, // highest_individual_score
+      teamA, teamB, teamB, teamA  // lowest_team_score
     ]);
 
     // Step 4: Format Response
     const lastFiveResults = lastMatches.map((match) => ({
+      match_id: match.match_id,
+      api_id: match.api_id,
       match_date: match.match_date,
       match_result: `${match.team_1_name} vs ${match.team_2_name} - ${match.winning_team_name || "No Result"} won by ${match.win_margin || "N/A"}`,
       winning_team: match.winning_team_name || "No Result",
       match_name: `${teamAInfo.short_name} vs ${teamBInfo.short_name}`,
-      match_slug: match.match_slug,
-      match_status: match.match_status || "No Status"
+      slug: match.slug || "Not Available",
+      status_note: match.status_note || "No Status"
     }));
 
     const response = {
@@ -4187,7 +4211,8 @@ app.get("/head-to-head-record-new", async (req, res) => {
       notable_records: {
         highest_team_score: notableRecords[0].highest_team_score || "Not available",
         best_bowling: notableRecords[0].best_bowling || "Not available",
-        highest_individual_score: notableRecords[0].highest_individual_score || "Not available"
+        highest_individual_score: notableRecords[0].highest_individual_score || "Not available",
+        lowest_team_score: notableRecords[0].lowest_team_score || "Not available"
       }
     };
 
@@ -4197,8 +4222,6 @@ app.get("/head-to-head-record-new", async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 });
-
-
 
 
 
