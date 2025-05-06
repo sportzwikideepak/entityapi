@@ -3689,8 +3689,14 @@ app.get("/venue-pitch-report-new", async (req, res) => {
         m.team_2,
         m.winning_team_id,
         m.status_note,
-        m.slug
+        m.slug,
+        t1.name AS team_1_name,
+        t2.name AS team_2_name,
+        t1.short_name AS team_1_short,
+        t2.short_name AS team_2_short
       FROM matches m
+      JOIN teams t1 ON m.team_1 = t1.id
+      JOIN teams t2 ON m.team_2 = t2.id
       WHERE m.venue_id = ?
         AND m.match_status_id = 2
         AND m.format_id IN (1, 3, 4, 6, 7, 8, 10, 17, 18, 19, 23)
@@ -3747,15 +3753,22 @@ app.get("/venue-pitch-report-new", async (req, res) => {
       venue_name: rows[0].venue_name,
       avg_first_inning_score: rows[0].avg_first_inning_score,
       highest_successful_chase: rows[0].highest_successful_chase,
-      last_5_matches: lastMatches.map((match) => ({
-        match_id: match.match_id,
-        api_id: match.api_id,
-        date_start: match.date_start,
-        team_1: match.team_1,
-        team_2: match.team_2,
-        status_note: match.status_note,
-        slug: match.slug
-      }))
+      last_5_matches: lastMatches.map((match) => {
+        const originalStatus = match.status_note || "No Status";
+        const shortStatus = originalStatus
+          .replaceAll(match.team_1_name, match.team_1_short)
+          .replaceAll(match.team_2_name, match.team_2_short);
+
+        return {
+          match_id: match.match_id,
+          api_id: match.api_id,
+          date_start: match.date_start,
+          team_1: match.team_1,
+          team_2: match.team_2,
+          match_status: shortStatus,
+          slug: match.slug
+        };
+      })
     };
 
     res.json(response);
@@ -3765,7 +3778,6 @@ app.get("/venue-pitch-report-new", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
 
 
 
@@ -4177,16 +4189,23 @@ app.get("/head-to-head-record-new", async (req, res) => {
     ]);
 
     // Step 4: Format Response
-    const lastFiveResults = lastMatches.map((match) => ({
-      match_id: match.match_id,
-      api_id: match.api_id,
-      match_date: match.match_date,
-      match_result: `${match.team_1_name} vs ${match.team_2_name} - ${match.winning_team_name || "No Result"} won by ${match.win_margin || "N/A"}`,
-      winning_team: match.winning_team_name || "No Result",
-      match_name: `${teamAInfo.short_name} vs ${teamBInfo.short_name}`,
-      slug: match.slug || "Not Available",
-      status_note: match.status_note || "No Status"
-    }));
+    const lastFiveResults = lastMatches.map((match) => {
+      const originalStatus = match.status_note || "No Status";
+      const matchStatus = originalStatus
+        .replaceAll(teamAInfo.name, teamAInfo.short_name)
+        .replaceAll(teamBInfo.name, teamBInfo.short_name);
+
+      return {
+        match_id: match.match_id,
+        api_id: match.api_id,
+        match_date: match.match_date,
+        match_result: `${match.team_1_name} vs ${match.team_2_name} - ${match.winning_team_name || "No Result"} won by ${match.win_margin || "N/A"}`,
+        winning_team: match.winning_team_name || "No Result",
+        match_name: `${teamAInfo.short_name} vs ${teamBInfo.short_name}`,
+        slug: match.slug || "Not Available",
+        match_status: matchStatus
+      };
+    });
 
     const response = {
       teamA: {
