@@ -3554,6 +3554,108 @@ app.get("/team-comparison-new", async (req, res) => {
 
 
 
+// app.get("/venue-pitch-report-new", async (req, res) => {
+//   try {
+//     const { match_id } = req.query;
+
+//     if (!match_id) {
+//       return res.status(400).json({ error: "match_id (api_id) is required." });
+//     }
+
+//     // Step 1: Get Venue ID
+//     const matchQuery = `
+//       SELECT id, api_id, venue_id
+//       FROM matches
+//       WHERE api_id = ?
+//       LIMIT 1;
+//     `;
+//     const [matchResult] = await db.execute(matchQuery, [match_id]);
+
+//     if (!matchResult.length || !matchResult[0].venue_id) {
+//       return res.status(404).json({ error: "Match not found or Venue ID is missing." });
+//     }
+
+//     const venue_id = matchResult[0].venue_id;
+
+//     // Step 2: Get last 5 completed short-format matches at this venue
+//     const lastMatchesQuery = `
+//       SELECT m.id AS match_id, m.api_id, m.date_start, m.team_1, m.team_2, m.winning_team_id
+//       FROM matches m
+//       WHERE m.venue_id = ?
+//         AND m.match_status_id = 2
+//         AND m.format_id IN (1, 3, 4, 6, 7, 8, 10, 17, 18, 19, 23)
+//       ORDER BY m.date_start DESC
+//       LIMIT 5;
+//     `;
+//     const [lastMatches] = await db.execute(lastMatchesQuery, [venue_id]);
+
+//     if (!lastMatches.length) {
+//       return res.status(404).json({ error: "No last 5 completed short-format matches found at this venue." });
+//     }
+
+//     const matchIds = lastMatches.map((m) => m.match_id);
+//     const placeholders = matchIds.map(() => "?").join(",");
+
+//     // Step 3: Calculate avg 1st innings score and highest successful chase
+//     const query = `
+//       WITH first_innings AS (
+//         SELECT match_id, SUM(score_runs) AS total
+//         FROM match_innings
+//         WHERE match_id IN (${placeholders})
+//           AND number = 1
+//         GROUP BY match_id
+//       ),
+//       successful_chases AS (
+//         SELECT mi.match_id, mi.batting_team_id AS team_id, SUM(mib.runs) AS total_score
+//         FROM match_inning_batters mib
+//         JOIN match_innings mi ON mi.id = mib.match_inning_id
+//         JOIN matches m ON m.id = mi.match_id
+//         WHERE mi.match_id IN (${placeholders})
+//           AND mi.number = 2
+//           AND m.winning_team_id = mi.batting_team_id
+//         GROUP BY mi.match_id, mi.batting_team_id
+//       )
+//       SELECT
+//         v.id AS venue_id,
+//         v.name AS venue_name,
+//         COALESCE(ROUND(AVG(fi.total), 0), 0) AS avg_first_inning_score,
+//         (SELECT COALESCE(MAX(sc.total_score), 0) FROM successful_chases sc) AS highest_successful_chase
+//       FROM venues v
+//       LEFT JOIN first_innings fi ON 1=1
+//       WHERE v.id = ?;
+//     `;
+
+//     const params = [...matchIds, ...matchIds, venue_id];
+//     const [rows] = await db.execute(query, params);
+
+//     if (!rows.length) {
+//       return res.status(404).json({ error: "No data available for these matches." });
+//     }
+
+//     const response = {
+//       venue_id: rows[0].venue_id,
+//       venue_name: rows[0].venue_name,
+//       avg_first_inning_score: rows[0].avg_first_inning_score,
+//       highest_successful_chase: rows[0].highest_successful_chase,
+//       last_5_matches: lastMatches.map((match) => ({
+//         match_id: match.match_id,
+//         api_id: match.api_id,
+//         date_start: match.date_start,
+//         team_1: match.team_1,
+//         team_2: match.team_2
+//       }))
+//     };
+
+//     res.json(response);
+
+//   } catch (error) {
+//     console.error("❌ Error fetching venue pitch report:", error.message);
+//     res.status(500).json({ error: "Server error" });
+//   }
+// });
+
+
+
 app.get("/venue-pitch-report-new", async (req, res) => {
   try {
     const { match_id } = req.query;
@@ -3579,7 +3681,15 @@ app.get("/venue-pitch-report-new", async (req, res) => {
 
     // Step 2: Get last 5 completed short-format matches at this venue
     const lastMatchesQuery = `
-      SELECT m.id AS match_id, m.api_id, m.date_start, m.team_1, m.team_2, m.winning_team_id
+      SELECT 
+        m.id AS match_id,
+        m.api_id,
+        m.date_start,
+        m.team_1,
+        m.team_2,
+        m.winning_team_id,
+        m.status_note,
+        m.slug
       FROM matches m
       WHERE m.venue_id = ?
         AND m.match_status_id = 2
@@ -3642,7 +3752,9 @@ app.get("/venue-pitch-report-new", async (req, res) => {
         api_id: match.api_id,
         date_start: match.date_start,
         team_1: match.team_1,
-        team_2: match.team_2
+        team_2: match.team_2,
+        status_note: match.status_note,
+        slug: match.slug
       }))
     };
 
@@ -3653,8 +3765,6 @@ app.get("/venue-pitch-report-new", async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 });
-
-
 
 
 
