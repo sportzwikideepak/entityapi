@@ -6,6 +6,8 @@ const rateLimit = require("express-rate-limit");
 const db = require("./config/db");
 const cheerio = require('cheerio');
 const Parser = require('rss-parser');
+const axios = require('axios');
+
 const { OpenAI } = require('openai');
 
 const app = express();
@@ -14,6 +16,7 @@ const PORT = process.env.PORT || 5000;
 app.use(express.json());
 app.use(helmet());
 app.use(cors());
+app.set('trust proxy', 1); // even for cross-origin frontend/backend
 
 app.use(
   rateLimit({
