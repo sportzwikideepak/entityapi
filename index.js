@@ -4,7 +4,9 @@ const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const db = require("./config/db");
-
+const cheerio = require('cheerio');
+const Parser = require('rss-parser');
+const { OpenAI } = require('openai');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -4638,36 +4640,122 @@ app.get('/impact-player', async (req, res) => {
 
 
 
-app.get('/impact-player', async (req, res) => {
+
+
+
+
+
+
+
+
+///ai
+
+
+
+
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// === ROUTE: GET /api/analyze?limit=1 ===
+app.get('/api/analyze-url', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ success: false, error: 'Missing URL' });
+
   try {
-    const query = `
-      SELECT 
-        id,
-        api_id,
-        match_id,
-        team_id,
-        team_name,
-        batting_impact,
-        fielding_impact
-      FROM mygame_impact_players
-      ORDER BY id DESC
-    `;
-    const [entries] = await db.execute(query);
+    const articleData = await extractArticleData(url);
+    const competitors = await getSimulatedCompetitors(articleData.title);
+    const seoReport = await analyzeAndSuggest(articleData, competitors);
 
-    const formatted = entries.map(e => ({
-      ...e,
-      batting_impact: Array.isArray(JSON.parse(e.batting_impact || '')) 
-        ? JSON.parse(e.batting_impact)[0] 
-        : JSON.parse(e.batting_impact || ''),
-      fielding_impact: Array.isArray(JSON.parse(e.fielding_impact || '')) 
-        ? JSON.parse(e.fielding_impact)[0] 
-        : JSON.parse(e.fielding_impact || '')
-    }));
-
-    res.json({ entries: formatted });
+    res.json({
+      success: true,
+      title: articleData.title,
+      url,
+      seo_report: seoReport
+    });
   } catch (error) {
-    console.error('Error fetching impact player entries:', error.message);
-    res.status(500).json({ message: 'Server error' });
+    console.error('Analyze URL error:', error);
+    res.status(500).json({ success: false, error: 'Failed to analyze URL' });
   }
 });
 
+
+// === Helper Functions ===
+async function fetchLatestArticles(rssUrl, limit = 1) {
+  const parser = new Parser();
+  const feed = await parser.parseURL(rssUrl);
+  return feed.items.slice(0, limit).map(item => ({
+    title: item.title,
+    link: item.link
+  }));
+}
+
+async function extractArticleData(url) {
+  const res = await axios.get(url);
+  const $ = cheerio.load(res.data);
+
+  const title = $('title').text().trim() || 'No Title';
+  const metaDescription = $('meta[name="description"]').attr('content') || 'No Description';
+
+  let content = '';
+  $('p').each((_, el) => {
+    content += $(el).text() + '\n';
+  });
+
+  return {
+    title,
+    description: metaDescription,
+    body: content.slice(0, 4000),
+  };
+}
+
+async function getSimulatedCompetitors(keyword) {
+  const prompt = `
+You are an SEO expert. Based on this keyword: "${keyword}", simulate the top 4 competitor article summaries that are ranking on Google.
+
+Return like this:
+
+1. [Title] - [URL]
+   - H2s used:
+   - Content Highlights:
+   - Schema Used:
+`;
+
+  const res = await openai.chat.completions.create({
+    model: 'gpt-4-turbo',
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.3,
+  });
+
+  return res.choices[0].message.content;
+}
+
+async function analyzeAndSuggest({ title, description, body }, competitors) {
+  const prompt = `
+You're an expert SEO content strategist.
+
+Below is a cricket article we're analyzing. Compare it to these top-ranking competitors.
+
+Your tasks:
+1. List SEO gaps in table format (Section | Issue | Suggestion)
+2. Write a better version of the article's intro (2–3 paragraphs) that incorporates those suggestions.
+
+---
+
+Article Title: ${title}
+Meta Description: ${description}
+Body:
+${body}
+
+Top Ranking Competitor Summaries:
+${competitors}
+
+Return first a markdown table of SEO GAP REPORT, then a heading: "✅ Recommended Rewrite" and write the new version.
+`;
+
+  const res = await openai.chat.completions.create({
+    model: 'gpt-4-turbo',
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.3,
+  });
+
+  return res.choices[0].message.content;
+}
