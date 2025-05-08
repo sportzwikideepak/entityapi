@@ -4759,3 +4759,15 @@ Return first a markdown table of SEO GAP REPORT, then a heading: "✅ Recommende
 
   return res.choices[0].message.content;
 }
+
+
+
+app.get('/api/feed', async (req, res) => {
+  try {
+    const articles = await fetchLatestArticles('https://cricketaddictor.com/feed/', 5);
+    res.json({ success: true, articles });
+  } catch (err) {
+    console.error('Feed fetch error:', err);
+    res.status(500).json({ success: false, error: 'Failed to fetch RSS feed' });
+  }
+});
